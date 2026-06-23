@@ -1,495 +1,55 @@
-(() => {
-  'use strict';
-
-  const STORAGE_KEY = 'boonwave_test_accounts_v1';
-  const SESSION_KEY = 'boonwave_test_session_v1';
-  const state = {
-    mode: 'login',
-    accountEmail: null,
-    data: null,
-    selectedIcon: '◉',
-    pendingParentId: null,
-    currentNodeType: 'project',
-    drag: null,
-  };
-
-  const $ = (id) => document.getElementById(id);
-  const screens = ['splash', 'authScreen', 'welcomeScreen', 'workspaceScreen'];
-  const nodeLabels = {
-    project: ['Проект', '▣'], goal: ['Цель', '◎'], stage: ['Этап', '⌁'], task: ['Задача', '✓'],
-    person: ['Человек', '◉'], idea: ['Идея', '◇'], purchase: ['Покупка', '▤'], wish: ['Желание', '☆'],
-    meeting: ['Встреча', '◷'], material: ['Материал', '▥'], file: ['Файл', '▧'], payment: ['Платёж', '₽'],
-    expense: ['Затрата', '−'], note: ['Заметка', '≡'], habit: ['Привычка', '↻'], document: ['Документ', '▱'],
-    self: ['Я', '◉']
-  };
-
-  const personalActions = ['goal', 'task', 'purchase', 'wish', 'meeting', 'idea', 'person', 'habit', 'document', 'note'];
-  const workActions = ['project', 'goal', 'stage', 'task', 'person', 'idea', 'material', 'file', 'payment', 'expense', 'note'];
-
-  function accounts() {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
-    catch { return {}; }
-  }
-
-  function saveAccounts(obj) { localStorage.setItem(STORAGE_KEY, JSON.stringify(obj)); }
-
-  function freshData() {
-    return {
-      version: 1,
-      onboarded: false,
-      welcomeShown: false,
-      activeWorkspaceId: null,
-      workspaces: [],
-      createdAt: new Date().toISOString(),
-    };
-  }
-
-  function saveData() {
-    if (!state.accountEmail || !state.data) return;
-    const all = accounts();
-    if (!all[state.accountEmail]) return;
-    all[state.accountEmail].data = state.data;
-    saveAccounts(all);
-  }
-
-  function showScreen(id) {
-    screens.forEach((screenId) => $(screenId).classList.toggle('active', screenId === id));
-  }
-
-  function showModal(id) { $(id).classList.remove('hidden'); }
-  function hideModal(id) { $(id).classList.add('hidden'); }
-
-  function toast(message) {
-    const el = $('toast');
-    el.textContent = message;
-    el.classList.remove('hidden');
-    clearTimeout(toast.timer);
-    toast.timer = setTimeout(() => el.classList.add('hidden'), 2300);
-  }
-
-  function uuid(prefix = 'id') {
-    return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-  }
-
-  function currentWorkspace() {
-    return state.data?.workspaces.find(w => w.id === state.data.activeWorkspaceId) || null;
-  }
-
-  function start() {
-    setTimeout(() => {
-      const email = localStorage.getItem(SESSION_KEY);
-      const all = accounts();
-      if (email && all[email]) {
-        state.accountEmail = email;
-        state.data = all[email].data || freshData();
-        enterApp();
-      } else {
-        showScreen('authScreen');
-      }
-    }, 1550);
-  }
-
-  function setAuthMode(mode) {
-    state.mode = mode;
-    $('loginTab').classList.toggle('active', mode === 'login');
-    $('registerTab').classList.toggle('active', mode === 'register');
-    $('confirmField').classList.toggle('hidden', mode !== 'register');
-    $('confirmInput').required = mode === 'register';
-    $('passwordInput').autocomplete = mode === 'register' ? 'new-password' : 'current-password';
-    $('authSubmit').textContent = mode === 'register' ? 'Создать аккаунт' : 'Войти';
-    $('authError').textContent = '';
-  }
-
-  function handleAuth(event) {
-    event.preventDefault();
-    const email = $('emailInput').value.trim().toLowerCase();
-    const password = $('passwordInput').value;
-    const confirm = $('confirmInput').value;
-    const error = $('authError');
-    error.textContent = '';
-
-    if (!email || !email.includes('@')) return error.textContent = 'Введите корректный email.';
-    if (password.length < 4) return error.textContent = 'Пароль должен содержать минимум 4 символа.';
-
-    const all = accounts();
-    if (state.mode === 'register') {
-      if (password !== confirm) return error.textContent = 'Пароли не совпадают.';
-      if (all[email]) return error.textContent = 'Такой локальный аккаунт уже существует.';
-      all[email] = { password, data: freshData() };
-      saveAccounts(all);
-    } else {
-      if (!all[email] || all[email].password !== password) return error.textContent = 'Неверный email или пароль.';
-    }
-
-    state.accountEmail = email;
-    state.data = all[email].data || freshData();
-    localStorage.setItem(SESSION_KEY, email);
-    enterApp();
-  }
-
-  function enterApp() {
-    if (!state.data.welcomeShown) {
-      showScreen('welcomeScreen');
-      state.data.welcomeShown = true;
-      saveData();
-      setTimeout(openWorkspace, 1750);
-    } else {
-      openWorkspace();
-    }
-  }
-
-  function openWorkspace() {
-    showScreen('workspaceScreen');
-    renderWorkspace();
-    if (!state.data.onboarded && state.data.workspaces.length === 0) {
-      setTimeout(() => showModal('onboardingModal'), 280);
-    }
-  }
-
-  function selectSpaceType(type) {
-    $('workspaceTypeInput').value = type;
-    $('workspaceFormTitle').textContent = type === 'personal' ? 'Личное пространство' : 'Рабочее пространство';
-    $('workspaceNameInput').placeholder = type === 'personal' ? 'Моя жизнь' : 'Работа';
-    $('workspaceNameInput').value = '';
-    state.selectedIcon = type === 'personal' ? '◉' : '▦';
-    document.querySelectorAll('.icon-option').forEach(btn => btn.classList.toggle('selected', btn.dataset.icon === state.selectedIcon));
-    hideModal('onboardingModal');
-    showModal('createWorkspaceModal');
-    setTimeout(() => $('workspaceNameInput').focus(), 200);
-  }
-
-  function createWorkspace(event) {
-    event.preventDefault();
-    const type = $('workspaceTypeInput').value;
-    const name = $('workspaceNameInput').value.trim() || (type === 'personal' ? 'Моя жизнь' : 'Работа');
-    const workspace = {
-      id: uuid('space'), type, name, icon: state.selectedIcon,
-      nodes: [], createdAt: new Date().toISOString(), viewport: { x: 0, y: 0, scale: 1 }
-    };
-
-    if (type === 'personal') {
-      workspace.nodes.push({
-        id: uuid('node'), type: 'self', name: 'Я', description: 'Личный центр', status: 'active', priority: 'medium',
-        parentId: null, x: 50, y: 43, root: true, createdAt: new Date().toISOString()
-      });
-    }
-
-    state.data.workspaces.push(workspace);
-    state.data.activeWorkspaceId = workspace.id;
-    state.data.onboarded = true;
-    saveData();
-    hideModal('createWorkspaceModal');
-    renderWorkspace();
-
-    if (type === 'work') setTimeout(() => showModal('createCoreModal'), 250);
-    else setTimeout(() => toast('Личное пространство создано'), 250);
-  }
-
-  function openNodeForm(type, parentId = null) {
-    state.currentNodeType = type;
-    state.pendingParentId = parentId;
-    const [label] = nodeLabels[type] || ['Элемент'];
-    $('nodeTypeInput').value = type;
-    $('nodeFormTitle').textContent = `Создать: ${label.toLowerCase()}`;
-    $('nodeEyebrow').textContent = parentId ? 'Связанный элемент' : 'Новое ядро';
-    $('nodeNameInput').value = type === 'self' ? 'Я' : '';
-    $('nodeDescriptionInput').value = '';
-    $('nodeStatusInput').value = 'planning';
-    $('nodePriorityInput').value = 'medium';
-    hideModal('createCoreModal');
-    hideModal('quickAddModal');
-    showModal('createNodeModal');
-    setTimeout(() => $('nodeNameInput').focus(), 180);
-  }
-
-  function createNode(event) {
-    event.preventDefault();
-    const workspace = currentWorkspace();
-    if (!workspace) return;
-    const type = $('nodeTypeInput').value;
-    const name = $('nodeNameInput').value.trim();
-    if (!name) return;
-
-    const root = !state.pendingParentId && ['project', 'goal', 'self'].includes(type);
-    const siblingIndex = workspace.nodes.filter(n => n.parentId === state.pendingParentId).length;
-    let x = 50, y = 46;
-    if (state.pendingParentId) {
-      const parent = workspace.nodes.find(n => n.id === state.pendingParentId);
-      const angle = (siblingIndex * 1.15) - 1.2;
-      x = Math.max(18, Math.min(82, parent.x + Math.cos(angle) * 29));
-      y = Math.max(16, Math.min(82, parent.y + Math.sin(angle) * 25));
-    } else if (workspace.nodes.length) {
-      x = 28 + ((workspace.nodes.length * 19) % 52);
-      y = 24 + ((workspace.nodes.length * 17) % 54);
-    }
-
-    workspace.nodes.push({
-      id: uuid('node'), type, name,
-      description: $('nodeDescriptionInput').value.trim(),
-      status: $('nodeStatusInput').value,
-      priority: $('nodePriorityInput').value,
-      parentId: state.pendingParentId,
-      x, y, root,
-      createdAt: new Date().toISOString()
-    });
-
-    saveData();
-    hideModal('createNodeModal');
-    renderWorkspace();
-    toast(`${nodeLabels[type]?.[0] || 'Элемент'} создан`);
-    state.pendingParentId = null;
-  }
-
-  function renderWorkspace() {
-    const workspace = currentWorkspace();
-    const empty = $('emptyState');
-    const layer = $('nodesLayer');
-    layer.innerHTML = '';
-
-    if (!workspace) {
-      $('workspaceTypeBadge').textContent = '—';
-      $('workspaceKind').textContent = 'Нет пространства';
-      $('workspaceTitle').textContent = 'BOONWAVE';
-      empty.classList.remove('hidden');
-      $('emptyTitle').textContent = 'Создайте первое пространство';
-      drawConnections([]);
-      return;
-    }
-
-    $('workspaceTypeBadge').textContent = workspace.icon;
-    $('workspaceKind').textContent = workspace.type === 'personal' ? 'Личное' : 'Работа';
-    $('workspaceTitle').textContent = workspace.name;
-    empty.classList.toggle('hidden', workspace.nodes.length > 0);
-    $('emptyTitle').textContent = workspace.type === 'work' ? 'Создайте проект или рабочую цель' : 'Добавьте первое дело';
-
-    workspace.nodes.forEach(node => layer.appendChild(nodeElement(node, workspace)));
-    requestAnimationFrame(() => drawConnections(workspace.nodes));
-  }
-
-  function nodeElement(node, workspace) {
-    const el = document.createElement('article');
-    const [label, icon] = nodeLabels[node.type] || ['Элемент', '•'];
-    el.className = `node-card${node.root ? ' root' : ''}${node.type === 'self' ? ' person-root' : ''}`;
-    el.dataset.id = node.id;
-    el.style.left = `${node.x}%`;
-    el.style.top = `${node.y}%`;
-    el.innerHTML = `
-      <div class="node-head">
-        <span class="node-type">${icon} ${label}</span>
-        <span class="node-status ${escapeHtml(node.status)}"></span>
-      </div>
-      <h3>${escapeHtml(node.name)}</h3>
-      ${node.description ? `<p>${escapeHtml(node.description)}</p>` : ''}
-      ${node.type !== 'self' ? `<div class="node-footer"><span>${priorityLabel(node.priority)}</span><span>${childCount(workspace, node.id)} связ.</span></div>` : ''}
-      <button class="node-add" type="button" aria-label="Добавить связанный элемент">+</button>
-    `;
-
-    const add = el.querySelector('.node-add');
-    add.addEventListener('pointerdown', e => e.stopPropagation());
-    add.addEventListener('click', e => {
-      e.stopPropagation();
-      state.pendingParentId = node.id;
-      showQuickAdd(node.id);
-    });
-
-    el.addEventListener('pointerdown', startDrag);
-    el.addEventListener('dblclick', () => showQuickAdd(node.id));
-    return el;
-  }
-
-  function startDrag(event) {
-    if (event.target.closest('button')) return;
-    const el = event.currentTarget;
-    const workspace = currentWorkspace();
-    const node = workspace.nodes.find(n => n.id === el.dataset.id);
-    const canvasRect = $('canvas').getBoundingClientRect();
-    state.drag = { el, node, canvasRect, pointerId: event.pointerId, moved: false };
-    el.setPointerCapture(event.pointerId);
-    el.addEventListener('pointermove', moveDrag);
-    el.addEventListener('pointerup', endDrag, { once: true });
-    el.addEventListener('pointercancel', endDrag, { once: true });
-  }
-
-  function moveDrag(event) {
-    if (!state.drag) return;
-    const { el, node, canvasRect } = state.drag;
-    const x = ((event.clientX - canvasRect.left) / canvasRect.width) * 100;
-    const y = ((event.clientY - canvasRect.top) / canvasRect.height) * 100;
-    node.x = Math.max(10, Math.min(90, x));
-    node.y = Math.max(10, Math.min(90, y));
-    el.style.left = `${node.x}%`;
-    el.style.top = `${node.y}%`;
-    state.drag.moved = true;
-    drawConnections(currentWorkspace().nodes);
-  }
-
-  function endDrag(event) {
-    const drag = state.drag;
-    if (!drag) return;
-    drag.el.releasePointerCapture?.(drag.pointerId);
-    drag.el.removeEventListener('pointermove', moveDrag);
-    state.drag = null;
-    if (drag.moved) saveData();
-  }
-
-  function drawConnections(nodes) {
-    const svg = $('connections');
-    const canvas = $('canvas').getBoundingClientRect();
-    svg.setAttribute('viewBox', `0 0 ${canvas.width} ${canvas.height}`);
-    svg.innerHTML = `
-      <defs>
-        <linearGradient id="waveGradient" x1="0" x2="1">
-          <stop offset="0" stop-color="#a993ff" />
-          <stop offset=".5" stop-color="#d5ff57" />
-          <stop offset="1" stop-color="#77e7e2" />
-        </linearGradient>
-      </defs>`;
-
-    nodes.filter(n => n.parentId).forEach(node => {
-      const parent = nodes.find(n => n.id === node.parentId);
-      if (!parent) return;
-      const x1 = parent.x / 100 * canvas.width;
-      const y1 = parent.y / 100 * canvas.height;
-      const x2 = node.x / 100 * canvas.width;
-      const y2 = node.y / 100 * canvas.height;
-      const dx = x2 - x1;
-      const control = Math.max(40, Math.abs(dx) * .46);
-      const c1x = x1 + (dx >= 0 ? control : -control);
-      const c2x = x2 - (dx >= 0 ? control : -control);
-      const wave = Math.sin((x1 + y2) * .015) * 22;
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('class', 'connection-path');
-      path.setAttribute('d', `M ${x1} ${y1} C ${c1x} ${y1 + wave}, ${c2x} ${y2 - wave}, ${x2} ${y2}`);
-      svg.appendChild(path);
-    });
-  }
-
-  function childCount(workspace, nodeId) { return workspace.nodes.filter(n => n.parentId === nodeId).length; }
-  function priorityLabel(value) { return value === 'high' ? 'Высокий' : value === 'low' ? 'Низкий' : 'Средний'; }
-  function escapeHtml(value = '') { return String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
-
-  function showQuickAdd(parentId = null) {
-    const workspace = currentWorkspace();
-    if (!workspace) return showModal('onboardingModal');
-    state.pendingParentId = parentId;
-    const actions = workspace.type === 'personal' ? personalActions : workActions;
-    const container = $('quickActions');
-    container.innerHTML = '';
-    actions.forEach(type => {
-      const [label, icon] = nodeLabels[type];
-      const btn = document.createElement('button');
-      btn.className = 'quick-action';
-      btn.type = 'button';
-      btn.innerHTML = `<span>${icon}</span><small>${label}</small>`;
-      btn.addEventListener('click', () => {
-        let effectiveParentId = parentId;
-        if (!effectiveParentId && !['project', 'goal'].includes(type)) {
-          const roots = workspace.nodes.filter(node => node.root);
-          if (roots.length === 1) effectiveParentId = roots[0].id;
-        }
-        openNodeForm(type, effectiveParentId);
-      });
-      container.appendChild(btn);
-    });
-    showModal('quickAddModal');
-  }
-
-  function renderWorkspaceList() {
-    const list = $('workspaceList');
-    list.innerHTML = '';
-    state.data.workspaces.forEach(workspace => {
-      const btn = document.createElement('button');
-      btn.className = `workspace-row${workspace.id === state.data.activeWorkspaceId ? ' active' : ''}`;
-      btn.type = 'button';
-      btn.innerHTML = `<span class="workspace-row-icon">${escapeHtml(workspace.icon)}</span><span class="workspace-row-text"><strong>${escapeHtml(workspace.name)}</strong><small>${workspace.type === 'personal' ? 'Личное' : 'Работа'} · ${workspace.nodes.length} элементов</small></span>`;
-      btn.addEventListener('click', () => {
-        state.data.activeWorkspaceId = workspace.id;
-        saveData();
-        hideModal('switcherModal');
-        renderWorkspace();
-      });
-      list.appendChild(btn);
-    });
-  }
-
-  function exportData() {
-    const blob = new Blob([JSON.stringify(state.data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `boonwave-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function importData(file) {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(reader.result);
-        if (!Array.isArray(parsed.workspaces)) throw new Error('invalid');
-        state.data = parsed;
-        saveData();
-        hideModal('profileModal');
-        renderWorkspace();
-        toast('Данные импортированы');
-      } catch { toast('Не удалось прочитать файл'); }
-    };
-    reader.readAsText(file);
-  }
-
-  function bind() {
-    $('loginTab').addEventListener('click', () => setAuthMode('login'));
-    $('registerTab').addEventListener('click', () => setAuthMode('register'));
-    $('authForm').addEventListener('submit', handleAuth);
-    $('workspaceForm').addEventListener('submit', createWorkspace);
-    $('nodeForm').addEventListener('submit', createNode);
-
-    document.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', () => hideModal(btn.dataset.close)));
-    document.querySelectorAll('.space-choice').forEach(btn => btn.addEventListener('click', () => selectSpaceType(btn.dataset.spaceType)));
-    document.querySelectorAll('.core-choice').forEach(btn => btn.addEventListener('click', () => openNodeForm(btn.dataset.coreType)));
-    document.querySelectorAll('.icon-option').forEach(btn => btn.addEventListener('click', () => {
-      state.selectedIcon = btn.dataset.icon;
-      document.querySelectorAll('.icon-option').forEach(item => item.classList.toggle('selected', item === btn));
-    }));
-
-    $('emptyCreateButton').addEventListener('click', () => currentWorkspace() ? (currentWorkspace().type === 'work' ? showModal('createCoreModal') : showQuickAdd()) : showModal('onboardingModal'));
-    $('quickAddButton').addEventListener('click', () => showQuickAdd());
-    $('spaceSwitcher').addEventListener('click', () => { renderWorkspaceList(); showModal('switcherModal'); });
-    $('addWorkspaceButton').addEventListener('click', () => { hideModal('switcherModal'); showModal('onboardingModal'); });
-    $('profileButton').addEventListener('click', () => { $('profileEmail').textContent = state.accountEmail || ''; showModal('profileModal'); });
-    $('logoutButton').addEventListener('click', () => { localStorage.removeItem(SESSION_KEY); location.reload(); });
-    $('exportButton').addEventListener('click', exportData);
-    $('importInput').addEventListener('change', e => importData(e.target.files[0]));
-    $('todayButton').addEventListener('click', () => toast('Экран «Сегодня» будет следующим модулем'));
-    $('searchButton').addEventListener('click', () => toast('Поиск будет добавлен в следующей версии'));
-    document.querySelectorAll('.nav-item').forEach(btn => btn.addEventListener('click', () => {
-      document.querySelectorAll('.nav-item').forEach(item => item.classList.toggle('active', item === btn));
-      if (btn.dataset.view !== 'tree') toast(`Раздел «${btn.querySelector('small').textContent}» — следующий этап теста`);
-    }));
-
-    window.addEventListener('resize', () => drawConnections(currentWorkspace()?.nodes || []));
-  }
-
-  function registerServiceWorker() {
-    if (!('serviceWorker' in navigator)) return;
-    window.addEventListener('load', async () => {
-      try {
-        await navigator.serviceWorker.register('./sw.js');
-        let refreshing = false;
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
-          if (refreshing) return;
-          refreshing = true;
-          window.location.reload();
-        });
-      } catch (error) {
-        console.warn('Service worker registration failed:', error);
-      }
-    });
-  }
-
-  bind();
-  registerServiceWorker();
-  start();
-})();
+const $=(s,r=document)=>r.querySelector(s); const $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const uid=()=>crypto.randomUUID(); const now=()=>new Date().toISOString();
+const app=$('#app'); let state={screen:'auth',tab:'space',space:'work',user:null,data:null,zoom:1,pan:{x:0,y:0},selected:null};
+const DB='boonwave-db-v1', STORE='files';
+function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+async function putFile(id,file){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(file,id);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}
+async function getFile(id){const db=await openDB();return new Promise((res,rej)=>{const r=db.transaction(STORE).objectStore(STORE).get(id);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+async function delFile(id){const db=await openDB();return new Promise((res)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(id);tx.oncomplete=res})}
+const keyUsers='bw_users', keySession='bw_session';
+function users(){return JSON.parse(localStorage.getItem(keyUsers)||'{}')} function setUsers(v){localStorage.setItem(keyUsers,JSON.stringify(v))}
+function defaultData(){const me=uid();return {version:1,spaces:{personal:{name:'Личное'},work:{name:'Работа'}},nodes:[{id:me,type:'me',space:'personal',title:'Я',subtitle:'Личная система',x:80,y:100,level:2,locked:false,status:'active',priority:'medium',progress:0,tasks:[],contacts:[],attachments:[],notes:'',budget:0,advance:0,balance:0,address:'',due:'',createdAt:now()}],links:[],settings:{lastSpace:'work'},updatedAt:now()}}
+function save(){if(!state.user||!state.data)return;const u=users();u[state.user].data=state.data;u[state.user].updatedAt=now();setUsers(u)}
+function toast(t){const e=document.createElement('div');e.className='toast';e.textContent=t;document.body.append(e);setTimeout(()=>e.remove(),1800)}
+function icon(type){return ({me:'◎',project:'▣',goal:'◉',idea:'✦',person:'●',stage:'◇',task:'✓'}[type]||'•')}
+function typeName(type){return ({me:'Я',project:'Проект',goal:'Цель',idea:'Идея',person:'Человек',stage:'Этап'}[type]||type)}
+function boot(){const s=localStorage.getItem(keySession);if(s&&users()[s]){state.user=s;state.data=users()[s].data||defaultData();state.screen='main'}render()}
+function render(){app.innerHTML=''; if(state.screen==='auth')return renderAuth(); renderMain()}
+function renderAuth(){app.innerHTML=`<div class="auth"><div class="authCard"><div class="brand">BOONWAVE</div><svg class="wave" viewBox="0 0 240 80"><path d="M8 48C62-20 86 100 132 39S190 76 232 18" fill="none" stroke="#d7ff57" stroke-width="7" stroke-linecap="round"/></svg><h1>Личное и работа в одной системе</h1><p>Данные хранятся локально на устройстве. Интернет не нужен после первой загрузки.</p><div class="stack"><div class="field"><label>Email</label><input id="email" type="email" autocomplete="email"></div><div class="field"><label>Пароль</label><input id="pass" type="password" autocomplete="current-password"></div><button class="primary" id="login">Войти</button><button class="secondary" id="register">Создать локальный аккаунт</button></div></div></div>`;
+$('#login').onclick=()=>auth(false);$('#register').onclick=()=>auth(true)}
+function auth(reg){const e=$('#email').value.trim().toLowerCase(),p=$('#pass').value;if(!e||p.length<4)return toast('Введите email и пароль от 4 символов');const u=users();if(reg){if(u[e])return toast('Аккаунт уже существует');u[e]={password:p,data:defaultData(),createdAt:now()};setUsers(u)}else if(!u[e]||u[e].password!==p)return toast('Неверный email или пароль');state.user=e;state.data=u[e].data;localStorage.setItem(keySession,e);state.screen='main';render()}
+function renderMain(){app.innerHTML=`<div class="app"><header class="topbar"><div class="title">BOONWAVE</div><div class="seg"><button data-space="personal" class="${state.space==='personal'?'active':''}">Личное</button><button data-space="work" class="${state.space==='work'?'active':''}">Работа</button></div><button class="iconBtn" id="profile">⋯</button></header><main class="workspace" id="workspace"></main><nav class="bottomNav"><button data-tab="today" class="${state.tab==='today'?'active':''}"><span>◷</span>Сегодня</button><button data-tab="space" class="${state.tab==='space'?'active':''}"><span>⌘</span>Пространство</button><button id="add" class="plus">＋</button><button data-tab="search" class="${state.tab==='search'?'active':''}"><span>⌕</span>Поиск</button><button data-tab="profile" class="${state.tab==='profile'?'active':''}"><span>◎</span>Я</button></nav></div>`;
+$$('[data-space]').forEach(b=>b.onclick=()=>{state.space=b.dataset.space;state.tab='space';renderMain()});$$('[data-tab]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tab;renderMain()});$('#add').onclick=showAdd;$('#profile').onclick=showProfile;
+if(state.tab==='space')renderCanvas();if(state.tab==='today')renderToday();if(state.tab==='search')renderSearch();if(state.tab==='profile')renderProfilePage()}
+function renderCanvas(){const w=$('#workspace');const nodes=state.data.nodes.filter(n=>n.space===state.space);w.innerHTML=`<div class="canvas" id="canvas"><div class="grid"></div><svg class="links" id="links"></svg></div><div class="fabTools"><button id="zin">＋</button><button id="zout">−</button><button id="fit">⌗</button></div>${nodes.length?'':'<div class="empty"><div><b>Пустое пространство</b>Создайте проект, цель, идею или человека.</div></div>'}`;const c=$('#canvas');applyTransform();nodes.forEach(n=>c.append(nodeEl(n)));drawLinks();$('#zin').onclick=()=>setZoom(state.zoom+.15);$('#zout').onclick=()=>setZoom(state.zoom-.15);$('#fit').onclick=fitView;setupCanvasPan(c)}
+function applyTransform(){const c=$('#canvas');if(c)c.style.transform=`translate(${state.pan.x}px,${state.pan.y}px) scale(${state.zoom})`}
+function setZoom(z){state.zoom=Math.max(.45,Math.min(1.6,z));autoLevels();applyTransform();renderCanvas()}
+function autoLevels(){state.data.nodes.filter(n=>n.space===state.space).forEach(n=>{if(n.manualLevel)return;n.level=state.zoom<.68?1:state.zoom>1.22?3:2});save()}
+function fitView(){const ns=state.data.nodes.filter(n=>n.space===state.space);if(!ns.length)return;const minX=Math.min(...ns.map(n=>n.x)),minY=Math.min(...ns.map(n=>n.y)),maxX=Math.max(...ns.map(n=>n.x+300)),maxY=Math.max(...ns.map(n=>n.y+220));const w=$('#workspace');state.zoom=Math.min(1,Math.max(.5,Math.min(w.clientWidth/(maxX-minX+80),w.clientHeight/(maxY-minY+80))));state.pan={x:30-minX*state.zoom,y:30-minY*state.zoom};autoLevels();renderCanvas()}
+function setupCanvasPan(c){let start=null;c.addEventListener('pointerdown',e=>{if(e.target.closest('.node'))return;start={x:e.clientX,y:e.clientY,px:state.pan.x,py:state.pan.y};c.setPointerCapture(e.pointerId)});c.addEventListener('pointermove',e=>{if(!start)return;state.pan={x:start.px+e.clientX-start.x,y:start.py+e.clientY-start.y};applyTransform()});c.addEventListener('pointerup',()=>start=null)}
+function nodeEl(n){const el=document.createElement('article');el.className=`node level-${n.level}${n.locked?' locked':''}`;el.style.left=n.x+'px';el.style.top=n.y+'px';el.dataset.id=n.id;const done=n.tasks.filter(t=>t.done).length;const p=n.tasks.length?Math.round(done/n.tasks.length*100):(n.progress||0);el.innerHTML=`<div class="nodeHead"><div class="nodeIcon">${n.cover?'<img data-cover="'+n.cover+'">':icon(n.type)}</div><div class="nodeTitle"><strong>${esc(n.title||typeName(n.type))}</strong><small>${esc(n.subtitle||typeName(n.type))}</small></div><button class="nodeMenu">•••</button></div><div class="nodeBody"><div class="chips mediumOnly"><span class="chip accent">${esc(n.status||'active')}</span><span class="chip">${esc(n.priority||'medium')}</span>${n.due?`<span class="chip">${n.due}</span>`:''}</div><div class="summary mediumOnly"><div class="metric"><span>Прогресс</span><b>${p}%</b></div><div class="metric"><span>Задачи</span><b>${done}/${n.tasks.length}</b></div>${n.type==='project'?`<div class="metric"><span>Бюджет</span><b>${money(n.budget)}</b></div><div class="metric"><span>Остаток</span><b>${money(n.balance)}</b></div>`:''}</div><div class="progress mediumOnly"><i style="width:${p}%"></i></div><div class="section mediumOnly"><h4>Ближайшие задачи</h4>${n.tasks.slice(0,3).map(t=>`<div class="taskRow"><input type="checkbox" data-task="${t.id}" ${t.done?'checked':''}><span>${esc(t.title)}</span></div>`).join('')||'<small>Задач пока нет</small>'}<div class="quickAdd"><input placeholder="Добавить задачу"><button data-quick>＋</button></div></div><div class="fullOnly">${fullNode(n)}</div></div>`;
+if(n.cover)loadCover(el,n.cover);el.querySelector('.nodeMenu').onclick=e=>{e.stopPropagation();showNodeMenu(n)};el.querySelector('[data-quick]')?.addEventListener('click',()=>{const inp=el.querySelector('.quickAdd input');if(inp.value.trim()){n.tasks.push({id:uid(),title:inp.value.trim(),done:false,due:''});save();renderCanvas()}});el.querySelectorAll('[data-task]').forEach(ch=>ch.onchange=()=>{n.tasks.find(t=>t.id===ch.dataset.task).done=ch.checked;save();renderCanvas()});el.ondblclick=()=>{n.level=n.level===3?2:3;n.manualLevel=true;save();renderCanvas()};setupDrag(el,n);return el}
+function fullNode(n){return `<div class="section"><h4>Описание</h4><div>${esc(n.notes||'Нет описания')}</div></div><div class="section"><h4>Контакты</h4>${n.contacts.slice(0,4).map(c=>`<div class="contactRow"><span>●</span><div><b>${esc(c.name)}</b><small>${esc(c.role||'')}</small></div></div>`).join('')||'<small>Контактов нет</small>'}</div><div class="section"><h4>Вложения</h4>${n.attachments.slice(0,5).map(f=>`<div class="fileRow"><span>${f.kind==='image'?'▧':'▤'}</span><span>${esc(f.name)}</span></div>`).join('')||'<small>Файлов нет</small>'}</div>`}
+async function loadCover(el,id){const f=await getFile(id);if(f){const u=URL.createObjectURL(f);const im=el.querySelector('[data-cover]');if(im){im.src=u;im.onload=()=>URL.revokeObjectURL(u)}}}
+function setupDrag(el,n){let s=null,timer=null;el.addEventListener('pointerdown',e=>{if(e.target.closest('button,input'))return;timer=setTimeout(()=>showNodeMenu(n),520);if(n.locked)return;s={x:e.clientX,y:e.clientY,nx:n.x,ny:n.y};el.setPointerCapture(e.pointerId)});el.addEventListener('pointermove',e=>{if(!s)return;clearTimeout(timer);n.x=s.nx+(e.clientX-s.x)/state.zoom;n.y=s.ny+(e.clientY-s.y)/state.zoom;el.style.left=n.x+'px';el.style.top=n.y+'px';drawLinks()});el.addEventListener('pointerup',()=>{clearTimeout(timer);if(s){s=null;save()}})}
+function drawLinks(){const svg=$('#links');if(!svg)return;svg.innerHTML='';const map=Object.fromEntries(state.data.nodes.map(n=>[n.id,n]));state.data.links.forEach(l=>{const a=map[l.from],b=map[l.to];if(!a||!b||a.space!==state.space||b.space!==state.space)return;const x1=a.x+140,y1=a.y+60,x2=b.x+140,y2=b.y+60,dx=Math.abs(x2-x1)*.45;svg.insertAdjacentHTML('beforeend',`<path d="M${x1},${y1} C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}" fill="none" stroke="rgba(215,255,87,.55)" stroke-width="3" stroke-linecap="round"/>`)})}
+function showAdd(){sheet(`<div class="sheetTitle"><h3>Что добавить</h3><button class="ghost" data-close>Закрыть</button></div><div class="sheetGrid">${[['project','▣','Проект'],['goal','◉','Цель'],['idea','✦','Идея'],['person','●','Человек'],['stage','◇','Этап'],['me','◎','Я']].map(x=>`<button class="actionTile" data-type="${x[0]}"><b>${x[1]}</b>${x[2]}</button>`).join('')}</div>`);$$('[data-type]').forEach(b=>b.onclick=()=>showEditor({type:b.dataset.type,space:state.space,x:80+Math.random()*120,y:90+Math.random()*180,level:2,tasks:[],contacts:[],attachments:[]}))}
+function showEditor(n){closeOverlay();const isNew=!n.id;modal(`<div class="sheetTitle"><h3>${isNew?'Новый элемент':'Редактирование'}</h3><button class="ghost" data-close>Закрыть</button></div><div class="stack"><div class="row"><div class="field"><label>Название</label><input id="fTitle" value="${escAttr(n.title||'')}"></div><div class="field"><label>Тип</label><select id="fType">${['me','project','goal','idea','person','stage'].map(t=>`<option value="${t}" ${n.type===t?'selected':''}>${typeName(t)}</option>`).join('')}</select></div></div><div class="row"><div class="field"><label>Статус</label><select id="fStatus"><option>подготовка</option><option>в работе</option><option>на паузе</option><option>завершён</option></select></div><div class="field"><label>Приоритет</label><select id="fPriority"><option>высокий</option><option selected>средний</option><option>низкий</option></select></div></div><div class="field"><label>Описание</label><textarea id="fNotes">${esc(n.notes||'')}</textarea></div><div class="row"><div class="field"><label>Срок</label><input id="fDue" type="date" value="${n.due||''}"></div><div class="field"><label>Адрес</label><input id="fAddress" value="${escAttr(n.address||'')}"></div></div><div class="row"><div class="field"><label>Бюджет</label><input id="fBudget" type="number" value="${n.budget||0}"></div><div class="field"><label>Аванс</label><input id="fAdvance" type="number" value="${n.advance||0}"></div></div><button class="primary" id="saveNode">Сохранить</button></div>`);$('#saveNode').onclick=()=>{Object.assign(n,{id:n.id||uid(),title:$('#fTitle').value.trim()||typeName($('#fType').value),type:$('#fType').value,status:$('#fStatus').value,priority:$('#fPriority').value,notes:$('#fNotes').value,due:$('#fDue').value,address:$('#fAddress').value,budget:+$('#fBudget').value||0,advance:+$('#fAdvance').value||0,balance:(+$('#fBudget').value||0)-(+$('#fAdvance').value||0),createdAt:n.createdAt||now()});if(isNew)state.data.nodes.push(n);save();closeOverlay();state.tab='space';renderMain()}}
+function showNodeMenu(n){sheet(`<div class="sheetTitle"><h3>${esc(n.title)}</h3><button class="ghost" data-close>Закрыть</button></div><div class="sheetGrid"><button class="actionTile" data-act="edit">✎<span>Редактировать</span></button><button class="actionTile" data-act="level">◫<span>Масштаб</span></button><button class="actionTile" data-act="lock">${n.locked?'🔓':'🔒'}<span>${n.locked?'Открепить':'Зафиксировать'}</span></button><button class="actionTile" data-act="image">▧<span>Изображения</span></button><button class="actionTile" data-act="file">▤<span>Файлы / PDF</span></button><button class="actionTile" data-act="contact">●<span>Контакт</span></button><button class="actionTile" data-act="link">⌁<span>Связать</span></button><button class="actionTile" data-act="delete">×<span>Удалить</span></button></div>`);$$('[data-act]').forEach(b=>b.onclick=()=>nodeAction(b.dataset.act,n))}
+function nodeAction(a,n){if(a==='edit')return showEditor(n);if(a==='level'){n.level=n.level%3+1;n.manualLevel=true;save();closeOverlay();renderCanvas()}if(a==='lock'){n.locked=!n.locked;save();closeOverlay();renderCanvas()}if(a==='image'||a==='file'){state.selected=n.id;closeOverlay();const p=a==='image'?$('#imagePicker'):$('#filePicker');p.click()}if(a==='contact')return contactModal(n);if(a==='link')return linkModal(n);if(a==='delete'){state.data.nodes=state.data.nodes.filter(x=>x.id!==n.id);state.data.links=state.data.links.filter(l=>l.from!==n.id&&l.to!==n.id);n.attachments.forEach(f=>delFile(f.id));save();closeOverlay();renderCanvas()}}
+function contactModal(n){closeOverlay();modal(`<div class="sheetTitle"><h3>Новый контакт</h3><button class="ghost" data-close>Закрыть</button></div><div class="stack"><input id="cName" placeholder="Имя"><input id="cRole" placeholder="Роль / специализация"><input id="cPhone" placeholder="Телефон"><input id="cEmail" placeholder="Email"><input id="cSocial" placeholder="Instagram / сайт"><button class="primary" id="cSave">Добавить</button></div>`);$('#cSave').onclick=()=>{n.contacts.push({id:uid(),name:$('#cName').value||'Контакт',role:$('#cRole').value,phone:$('#cPhone').value,email:$('#cEmail').value,social:$('#cSocial').value});save();closeOverlay();renderCanvas()}}
+function linkModal(n){closeOverlay();const opts=state.data.nodes.filter(x=>x.id!==n.id&&x.space===n.space);modal(`<div class="sheetTitle"><h3>Связать с элементом</h3><button class="ghost" data-close>Закрыть</button></div><div class="stack">${opts.map(x=>`<button class="secondary" data-target="${x.id}">${icon(x.type)} ${esc(x.title)}</button>`).join('')||'Нет других элементов'}</div>`);$$('[data-target]').forEach(b=>b.onclick=()=>{if(!state.data.links.some(l=>(l.from===n.id&&l.to===b.dataset.target)||(l.to===n.id&&l.from===b.dataset.target)))state.data.links.push({id:uid(),from:n.id,to:b.dataset.target});save();closeOverlay();renderCanvas()})}
+$('#filePicker').onchange=e=>handleFiles(e.target.files,'file');$('#imagePicker').onchange=e=>handleFiles(e.target.files,'image');
+async function handleFiles(list,kind){const n=state.data.nodes.find(x=>x.id===state.selected);if(!n)return;for(const f of list){const id=uid();await putFile(id,f);n.attachments.push({id,name:f.name,size:f.size,type:f.type,kind,createdAt:now()});if(kind==='image'&&!n.cover)n.cover=id}save();toast('Файлы добавлены');renderCanvas();$('#filePicker').value='';$('#imagePicker').value=''}
+function renderToday(){const w=$('#workspace'),items=[];state.data.nodes.forEach(n=>n.tasks.forEach(t=>{if(!t.done)items.push({n,t})}));w.innerHTML=`<div class="todayList"><h2>Сегодня</h2>${items.map(({n,t})=>`<div class="todayCard"><b>${esc(t.title)}</b><small>${esc(n.title)} · ${n.space==='work'?'Работа':'Личное'} ${t.due?'· '+t.due:''}</small></div>`).join('')||'<div class="todayCard">Активных задач нет</div>'}</div>`}
+function renderSearch(){const w=$('#workspace');w.innerHTML=`<div class="searchList"><h2>Поиск</h2><input id="q" placeholder="Проект, человек, материал, задача..."><div id="results"></div></div>`;$('#q').oninput=e=>{const q=e.target.value.toLowerCase();const ns=state.data.nodes.filter(n=>JSON.stringify(n).toLowerCase().includes(q));$('#results').innerHTML=q?ns.map(n=>`<div class="todayCard"><b>${icon(n.type)} ${esc(n.title)}</b><small>${typeName(n.type)} · ${n.space==='work'?'Работа':'Личное'}</small></div>`).join(''):''}}
+function renderProfilePage(){const w=$('#workspace');w.innerHTML=`<div class="todayList"><h2>Профиль и данные</h2><div class="todayCard"><b>${esc(state.user)}</b><small>Локальный аккаунт на этом устройстве</small></div><div class="stack"><button class="secondary" id="export">Экспортировать данные JSON</button><button class="secondary" id="import">Импортировать данные JSON</button><button class="secondary" id="logout">Выйти</button></div></div>`;$('#export').onclick=exportData;$('#import').onclick=()=>$('#importPicker').click();$('#logout').onclick=()=>{localStorage.removeItem(keySession);state={screen:'auth',tab:'space',space:'work',user:null,data:null,zoom:1,pan:{x:0,y:0}};render()}}
+$('#importPicker').onchange=async e=>{try{const txt=await e.target.files[0].text(),d=JSON.parse(txt);if(!d.nodes||!d.links)throw 0;state.data=d;save();toast('Данные импортированы');renderMain()}catch{toast('Некорректный файл')}}
+function exportData(){const blob=new Blob([JSON.stringify(state.data,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`boonwave-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(a.href)}
+function showProfile(){sheet(`<div class="sheetTitle"><h3>BOONWAVE</h3><button class="ghost" data-close>Закрыть</button></div><div class="stack"><button class="secondary" id="pExport">Экспорт данных</button><button class="secondary" id="pFit">Вписать пространство</button><button class="secondary" id="pLogout">Выйти</button></div>`);$('#pExport').onclick=exportData;$('#pFit').onclick=()=>{closeOverlay();fitView()};$('#pLogout').onclick=()=>{localStorage.removeItem(keySession);location.reload()}}
+function sheet(html){closeOverlay();document.body.insertAdjacentHTML('beforeend',`<div class="sheet overlay"><div class="sheetCard">${html}</div></div>`);$('.overlay').onclick=e=>{if(e.target===e.currentTarget)closeOverlay()};$('[data-close]')?.addEventListener('click',closeOverlay)}
+function modal(html){closeOverlay();document.body.insertAdjacentHTML('beforeend',`<div class="modal overlay"><div class="modalCard">${html}</div></div>`);$('.overlay').onclick=e=>{if(e.target===e.currentTarget)closeOverlay()};$('[data-close]')?.addEventListener('click',closeOverlay)}
+function closeOverlay(){$('.overlay')?.remove()}
+function esc(s=''){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}function escAttr(s=''){return esc(s)}function money(v){return new Intl.NumberFormat('ru-RU',{maximumFractionDigits:0}).format(v||0)+' ₽'}
+if('serviceWorker'in navigator){navigator.serviceWorker.register('./sw.js').then(()=>{let refreshing=false;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(!refreshing){refreshing=true;location.reload()}})})}
+setInterval(save,30000);document.addEventListener('visibilitychange',()=>{if(document.hidden)save()});window.addEventListener('beforeunload',save);boot();
