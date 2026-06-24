@@ -39,24 +39,61 @@ document.addEventListener("DOMContentLoaded",initializeOnboarding);
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const TYPES={
  project:{label:"Проект",icon:"◆"},goal:{label:"Цель",icon:"◎"},person:{label:"Человек",icon:"●"},
- idea:{label:"Идея",icon:"▧"},stage:{label:"Этап",icon:"◫"},task:{label:"Задача",icon:"✓"}
+ idea:{label:"Идея",icon:"▧"},stage:{label:"Этап",icon:"◫"},workflow:{label:"Рабочий процесс",icon:"⌁"},task:{label:"Задача",icon:"✓"}
 };
 const state={
  data:null,space:"work",scale:.82,tx:-250,ty:-180,selected:null,editing:null,linkMode:null,
- pointers:new Map(),gesture:null,dragNodeId:null,dragScreen:null,fileMode:"all"
+ pointers:new Map(),gesture:null,dragNodeId:null,dragScreen:null,fileMode:"all",activePanel:"tree"
 };
-const blank=()=>({version:"5-expanded",space:"work",nodes:[],links:[],inbox:[],updated:Date.now()});
+const blank=()=>({version:"5.6.0",space:"work",nodes:[],links:[],inbox:[],updated:Date.now()});
 function load(){try{return JSON.parse(localStorage.getItem("boonwave_v5_expanded"))||blank()}catch{return blank()}}
 function save(){state.data.updated=Date.now();localStorage.setItem("boonwave_v5_expanded",JSON.stringify(state.data))}
 state.data=load();
 
 function uid(){return crypto.randomUUID?crypto.randomUUID():Date.now()+"_"+Math.random().toString(16).slice(2)}
 function esc(s=""){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
-function nodes(){return state.data.nodes.filter(n=>n.space===state.space)}
+function nodes(){return state.data.nodes.filter(n=>n.space===state.space && !n.archived)}
 function nodeById(id){return state.data.nodes.find(n=>n.id===id)}
 function money(v){return Number(v||0).toLocaleString("ru-RU")+" ₽"}
 
-function cardDims(n){const level=typeLevel(n);return level===1?{w:132,h:94}:level===3?{w:316,h:260}:{w:210,h:118}}
+function cardDims(n){const level=typeLevel(n);return level===1?{w:116,h:82}:level===3?{w:330,h:340}:{w:232,h:168}}
+function setActivePanel(panel){
+ state.activePanel=panel;
+ document.querySelectorAll('.bottom-nav button').forEach(btn=>btn.classList.toggle('active',btn.dataset.action===panel));
+}
+function panelNodeList(filterFn){
+ return state.data.nodes.filter(n=>n.space===state.space).filter(filterFn||(()=>true));
+}
+function connectedNodes(rootId){
+ const all=state.data.nodes.filter(n=>n.space===state.space && !n.archived);
+ const links=state.data.links.filter(l=>{const a=nodeById(l.a),b=nodeById(l.b);return a?.space===state.space&&b?.space===state.space});
+ const seen=new Set([rootId]);
+ let changed=true;
+ while(changed){changed=false;links.forEach(l=>{if(seen.has(l.a)&&!seen.has(l.b)){seen.add(l.b);changed=true} if(seen.has(l.b)&&!seen.has(l.a)){seen.add(l.a);changed=true}})}
+ return all.filter(n=>seen.has(n.id));
+}
+function fitNodeCollection(list){
+ const rect=$("#workspaceWrap").getBoundingClientRect();
+ if(!list.length||!rect.width||!rect.height)return;
+ let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+ list.forEach(n=>{const d=cardDims(n);minX=Math.min(minX,n.x);minY=Math.min(minY,n.y);maxX=Math.max(maxX,n.x+d.w);maxY=Math.max(maxY,n.y+d.h)});
+ const pad=70;
+ const worldW=Math.max(160,maxX-minX+pad*2), worldH=Math.max(160,maxY-minY+pad*2);
+ const scale=Math.max(.38,Math.min(1.25,Math.min(rect.width/worldW,rect.height/worldH)));
+ state.scale=scale;
+ state.tx=(rect.width-(minX+maxX)*scale)/2;
+ state.ty=(rect.height-(minY+maxY)*scale)/2;
+ applyTransform();
+}
+function focusRoot(){
+ const ns=nodes(); if(!ns.length)return;
+ const root=ns.find(n=>n.type!=="stage")||ns[0];
+ const group=connectedNodes(root.id);
+ state.selected=root.id;
+ fitNodeCollection(group.length?group:[root]);
+ render();setActivePanel("tree");
+}
+function fitAllNodes(){ const ns=nodes(); if(!ns.length)return; fitNodeCollection(ns); render(); }
 function renderDotField(){
  const canvas=$("#workspaceDots"); if(!canvas) return;
  const rect=canvas.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
@@ -133,38 +170,62 @@ function render(){
       <span class="badge">⚙ ${counts.files||0}</span><span class="badge">✓ ${(n.tasks||[]).filter(t=>!t.done).length}</span>
       ${n.progress!=null?`<span class="badge">${n.progress}%</span>`:""}
     </div>
-    <div class="quick-expense">
-      <input class="expense-name" placeholder="Затрата">
-      <input class="expense-value" inputmode="decimal" placeholder="Сумма">
-      <button data-quick-expense="${n.id}">➤</button>
-    </div>
-    ${n.type==="project"?`<div class="quick-photo"><button class="photo-btn primary-lite" data-add-image="${n.id}">＋ Фото</button><button class="photo-btn" data-files="${n.id}">Файл</button></div>`:""}
+    ${n.type==="workflow"?`<div class="quick-expense"><input class="expense-name" placeholder="Затрата"><input class="expense-value" inputmode="decimal" placeholder="Сумма"><button data-quick-expense="${n.id}">➤</button></div>`:""}
+    ${n.type==="project"?`<div class="project-actions"><button class="photo-btn primary-lite" data-create-workflow="${n.id}">⌁ Рабочий процесс</button><button class="photo-btn" data-add-image="${n.id}">＋ Материал</button><button class="photo-btn" data-files="${n.id}">Файл</button></div>`:""}
   </div>`;
   attachNodeEvents(el,n);ws.appendChild(el)
  });
  $("#emptyState").classList.toggle("hidden",nodes().length>0);
  const cue=$("#addCue"); if(cue) cue.style.display = nodes().length>0 ? "none" : "flex";
- applyTransform();renderToday();renderInbox()
+ applyTransform();renderToday();renderResults();renderArchive()
 }
 function attachNodeEvents(el,n){
  let timer=null,start=null,moved=false;
+ const localPointers=new Map();
+ let pinch=null;
+ const resetPinch=()=>{pinch=null;el.style.transform="";el.style.zIndex=""};
  el.addEventListener("pointerdown",e=>{
   if(e.target.closest("input,button"))return;
   e.stopPropagation();if(e.target.closest('.hint-btn')) return; el.setPointerCapture(e.pointerId);
+  localPointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(localPointers.size===2){
+    if(timer)clearTimeout(timer);
+    const pts=[...localPointers.values()];
+    pinch={base:Math.hypot(pts[1].x-pts[0].x,pts[1].y-pts[0].y),promoted:false,opened:false};
+    start=null;moved=false;el.style.zIndex=45;
+    return;
+  }
   start={x:e.clientX,y:e.clientY,nx:n.x,ny:n.y};moved=false;state.dragNodeId=n.id;state.dragScreen={x:e.clientX,y:e.clientY};renderDotField();
-  timer=setTimeout(()=>{timer=null;navigator.vibrate?.(15);openContext(n,e.clientX,e.clientY)},480)
+  timer=setTimeout(()=>{timer=null;navigator.vibrate?.(15);openContext(n,e.clientX,e.clientY)},2000)
  });
  el.addEventListener("pointermove",e=>{
+  if(localPointers.has(e.pointerId))localPointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pinch&&localPointers.size>=2){
+    const pts=[...localPointers.values()];
+    const dist=Math.hypot(pts[1].x-pts[0].x,pts[1].y-pts[0].y);
+    const ratio=Math.max(1,Math.min(1.45,dist/Math.max(1,pinch.base)));
+    el.style.transform=`scale(${ratio})`;
+    if(ratio>1.18&&!pinch.promoted){
+      n.manualLevel=Math.min(3,(n.manualLevel||typeLevel(n))+1);
+      pinch.promoted=true; save(); render();
+    }
+    if(ratio>1.34&&!pinch.opened){ pinch.opened=true; resetPinch(); openDetail(n); }
+    return;
+  }
   if(!start||n.locked)return;
   const dx=(e.clientX-start.x)/state.scale,dy=(e.clientY-start.y)/state.scale; state.dragScreen={x:e.clientX,y:e.clientY};
   if(Math.hypot(dx,dy)>5){moved=true;if(timer)clearTimeout(timer);n.x=start.nx+dx;n.y=start.ny+dy;el.style.left=n.x+"px";el.style.top=n.y+"px";renderLinks();renderDotField()}
  });
- el.addEventListener("pointerup",e=>{
+ const endPointer=e=>{
+  localPointers.delete(e.pointerId);
   if(timer)clearTimeout(timer);
-  if(start&&moved){save()}else if(timer!==null){selectNode(n.id)}
+  if(pinch){ if(localPointers.size<2) resetPinch(); }
+  else if(start&&moved){save()}else if(start&&timer!==null){selectNode(n.id)}
   start=null; state.dragNodeId=null; state.dragScreen=null; renderDotField()
- });
- el.addEventListener("dblclick",e=>{e.stopPropagation();focusNode(n)});
+ };
+ el.addEventListener("pointerup",endPointer);
+ el.addEventListener("pointercancel",endPointer);
+ el.addEventListener("dblclick",e=>{e.stopPropagation();openDetail(n)});
 }
 function selectNode(id){state.selected=id;render()}
 function focusNode(n){
@@ -190,7 +251,7 @@ function renderLinks(){
 }
 function createNode(type,opts={}){
  const center={x:(innerWidth/2-state.tx)/state.scale-105,y:(innerHeight/2-state.ty)/state.scale-70};
- const defaults={project:{title:'Новый проект',client:'',address:'',status:'Подготовка',showHint:true},goal:{title:'Новая цель'},person:{title:'Новый человек'},idea:{title:'Новая идея'},stage:{title:'Новый этап'}};
+ const defaults={project:{title:'Новый проект',client:'',address:'',status:'Подготовка',showHint:true},goal:{title:'Новая цель'},person:{title:'Новый человек'},idea:{title:'Новая идея'},stage:{title:'Новый этап'},workflow:{title:'Рабочий процесс'}};
  const base=defaults[type]||{};
  const n={id:uid(),type,space:state.space,title:base.title||TYPES[type].label,x:center.x+Math.random()*40,y:center.y+Math.random()*40,
   status:base.status||'active',priority:'medium',note:'',tasks:[],expenses:[],contacts:[],files:[],counts:{images:0,pdf:0,files:0},progress:0,client:base.client||'',address:base.address||'',showHint:!!base.showHint};
@@ -250,15 +311,16 @@ function openContext(n,x,y){
  const actions=[
   ["Открыть",()=>openDetail(n)],["Изменить",()=>openEditor(n)],["Связать",()=>startLink(n)],
   [n.locked?"Открепить":"Зафиксировать",()=>{n.locked=!n.locked;save();render()}],
+  [n.archived?"Восстановить":"В архив",()=>{n.archived=!n.archived;save();render();renderArchive()}],
   ["Масштаб",()=>{n.manualLevel=(typeLevel(n)%3)+1;save();render()}],
-  ["Задача",()=>addTask(n)],["Файл",()=>pickFiles(n)]
+  ...(n.type==="project"?[["Рабочий процесс",()=>createWorkflowForProject(n)]]:[["Задача",()=>addTask(n)]]),["Файл",()=>pickFiles(n)]
  ];
  actions.forEach(([t,fn])=>{const b=document.createElement("button");b.textContent=t;b.onclick=()=>{c.classList.add("hidden");fn()};c.appendChild(b)});
  c.style.left=Math.min(x,innerWidth-300)+"px";c.style.top=Math.max(70,y-55)+"px";c.classList.remove("hidden")
 }
 function startLink(n){state.linkMode=n.id;toast("Выберите второй элемент для связи")}
 function openHint(n){
- toast('Подсказка: заполните проект и добавьте первую задачу');
+ toast('Подсказка: заполните проект и создайте рабочий процесс');
  n.showHint=false; save(); render(); setTimeout(()=>openEditor(n),350)
 }
 function addTask(n){
@@ -287,30 +349,50 @@ $("#filePicker").addEventListener("change",e=>{
  if(!(files.some(f=>f.type.startsWith("image/") && !n.image))) toast(state.fileMode==="image"?"Фото добавлено":"Файлы добавлены");
  e.target.value=""; e.target.accept=""; state.fileMode="all";
 });
+function filePreviewTile(f,index){
+ const ext=(f.name||'').split('.').pop().toUpperCase();
+ const cls=(f.type||'').startsWith('image/')?'is-image':(f.type==='application/pdf'?'is-pdf':'is-file');
+ return `<button class="gallery-tile ${cls}" data-preview-file="${index}" title="${esc(f.name)}"><span>${cls==='is-pdf'?'PDF':ext||'FILE'}</span><small>${esc(f.name)}</small></button>`;
+}
 function openDetail(n){
+ state.selected=n.id;
  $("#detailType").textContent=TYPES[n.type]?.label||n.type;$("#detailTitle").textContent=n.title;
  let body=`<section class="detail-section"><h3>Сводка</h3><p>${esc(n.note||"Нет описания")}</p></section>`;
  if(n.type==="project"){
-  const expenseTotal=(n.expenses||[]).reduce((s,e)=>s+Number(e.amount||0),0);
+  const linked=state.data.links.filter(l=>l.a===n.id||l.b===n.id).map(l=>nodeById(l.a===n.id?l.b:l.a)).filter(Boolean);
+  const workflow=linked.find(x=>x.type==="workflow");
   body+=`<section class="detail-section"><div class="stats">
    <div class="stat"><small>Бюджет</small><b>${money(n.budget)}</b></div>
    <div class="stat"><small>Аванс</small><b>${money(n.advance)}</b></div>
-   <div class="stat"><small>Затраты</small><b>${money(expenseTotal)}</b></div>
+   <div class="stat"><small>Остаток</small><b>${money(n.balance)}</b></div>
   </div></section>
-  <section class="detail-section"><h3>Быстрая затрата</h3><div class="expense-add">
-   <input id="detailExpenseName" placeholder="Доставка пластика"><input id="detailExpenseAmount" inputmode="decimal" placeholder="Сумма">
-   <button data-detail-expense="${n.id}">➤</button></div></section>
-  <section class="detail-section"><h3>Клиент и объект</h3><p>${esc(n.client||"Клиент не указан")} · ${esc(n.address||"Адрес не указан")}</p></section>`;
+  <section class="detail-section"><h3>Клиент и объект</h3><p>${esc(n.client||"Клиент не указан")} · ${esc(n.address||"Адрес не указан")}</p></section>
+  <section class="detail-section"><div class="section-title-row"><h3>Основные материалы</h3><span>${(n.files||[]).length}</span></div>
+   <div class="micro-gallery">${(n.files||[]).map(filePreviewTile).join("")||'<div class="empty-gallery">Дизайн-проект, PDF, векторные и производственные файлы</div>'}</div>
+   <div class="inline-actions"><button class="ghost" data-add-image="${n.id}">＋ Изображение</button><button class="ghost" data-files="${n.id}">＋ Файл</button></div>
+  </section>
+  <section class="detail-section"><h3>Рабочий процесс</h3>${workflow?`<button class="primary wide" data-open-node="${workflow.id}">Открыть рабочую карточку</button>`:`<button class="primary wide" data-create-workflow="${n.id}">⌁ Создать связанную карточку</button>`}</section>`;
+ } else if(n.type==="workflow"){
+  const expenseTotal=(n.expenses||[]).reduce((sum,e)=>sum+Number(e.amount||0),0);
+  body+=`<section class="detail-section"><div class="stats"><div class="stat"><small>Этапы</small><b>${(n.stages||[]).length}</b></div><div class="stat"><small>Открытые задачи</small><b>${(n.tasks||[]).filter(t=>!t.done).length}</b></div><div class="stat"><small>Затраты</small><b>${money(expenseTotal)}</b></div></div></section>
+  <section class="detail-section"><h3>Этапы и задачи</h3><div>${(n.tasks||[]).map(t=>`<label class="task-row"><input type="checkbox" data-task="${t.id}" ${t.done?'checked':''}><span>${esc(t.title)}</span></label>`).join('')||'<p>Задачи не добавлены</p>'}</div><button class="ghost" data-add-task="${n.id}">＋ Добавить задачу</button></section>
+  <section class="detail-section"><h3>Связанные люди</h3><div class="chips">${(n.people||[]).map(x=>`<span class="chip">${esc(x)}</span>`).join('')||'<span class="chip">Исполнители не назначены</span>'}</div></section>
+  <section class="detail-section"><h3>Быстрая затрата</h3><div class="expense-add"><input id="detailExpenseName" placeholder="Материал или услуга"><input id="detailExpenseAmount" inputmode="decimal" placeholder="Сумма"><button data-detail-expense="${n.id}">➤</button></div></section>
+  <section class="detail-section"><h3>Таблица затрат</h3>${(n.expenses||[]).map(e=>`<div class="list-card"><b>${esc(e.name)}</b><small>${money(e.amount)} · ${new Date(e.date).toLocaleDateString('ru-RU')}</small></div>`).join('')||'<p>Затрат пока нет</p>'}</section>`;
+ } else {
+  if(n.type==="person")body+=`<section class="detail-section"><h3>Резюме</h3><div class="chips">${(n.tags||"").split(",").filter(Boolean).map(x=>`<span class="chip">${esc(x.trim())}</span>`).join("")}</div><p>${esc(n.speciality||"")}<br>${esc(n.phone||"")} ${esc(n.email||"")}<br>${esc(n.site||"")} ${esc(n.social||"")}</p></section>`;
+  if(n.type==="idea")body+=`<section class="detail-section"><h3>Почему сохранено</h3><p>${esc(n.why||"")}</p><p>${esc(n.source||"")} · ${esc(n.url||"")}</p></section>`;
+  body+=`<section class="detail-section"><h3>Задачи</h3><div>${(n.tasks||[]).map(t=>`<label class="task-row"><input type="checkbox" data-task="${t.id}" ${t.done?'checked':''}><span>${esc(t.title)}</span></label>`).join("")||"<p>Нет задач</p>"}</div><button class="ghost" data-add-task="${n.id}">＋ Добавить задачу</button></section>`;
  }
- if(n.type==="person")body+=`<section class="detail-section"><h3>Резюме</h3><div class="chips">${(n.tags||"").split(",").filter(Boolean).map(x=>`<span class="chip">${esc(x.trim())}</span>`).join("")}</div>
- <p>${esc(n.speciality||"")}<br>${esc(n.phone||"")} ${esc(n.email||"")}<br>${esc(n.site||"")} ${esc(n.social||"")}</p></section>`;
- if(n.type==="idea")body+=`<section class="detail-section"><h3>Почему сохранено</h3><p>${esc(n.why||"")}</p><p>${esc(n.source||"")} · ${esc(n.url||"")}</p></section>`;
- body+=`<section class="detail-section"><h3>Задачи</h3><div id="detailTasks">${(n.tasks||[]).map(t=>`<label class="task-row"><input type="checkbox" data-task="${t.id}" ${t.done?"checked":""}><span>${esc(t.title)}</span></label>`).join("")||"<p>Нет задач</p>"}
- <button class="ghost" data-add-task="${n.id}">＋ Добавить задачу</button></div></section>
- <section class="detail-section"><h3>Материалы</h3><div class="file-row">${(n.files||[]).map(f=>`<div class="file-tile">${esc(f.name)}</div>`).join("")||"<p>Файлы не добавлены</p>"}</div><button class="ghost" data-add-image="${n.id}">＋ Фото</button> <button class="ghost" data-files="${n.id}">＋ Файл</button></section>`;
- if(n.type==="project")body+=`<section class="detail-section"><h3>Таблица затрат</h3>${(n.expenses||[]).map(e=>`<div class="list-card"><b>${esc(e.name)}</b><small>${money(e.amount)} · ${new Date(e.date).toLocaleDateString("ru-RU")}</small></div>`).join("")||"<p>Затрат пока нет</p>"}</section>`;
- $("#detailBody").innerHTML=body;$("#detail").showModal()
+ $("#detailBody").innerHTML=body;$("#detail").showModal();
 }
+function createWorkflowForProject(project){
+ const existing=state.data.links.filter(l=>l.a===project.id||l.b===project.id).map(l=>nodeById(l.a===project.id?l.b:l.a)).find(n=>n?.type==="workflow");
+ if(existing){openDetail(existing);return existing}
+ const n={id:uid(),type:'workflow',space:project.space,title:`Рабочий процесс · ${project.title}`,x:project.x+360,y:project.y+40,status:'В работе',priority:'Средний',note:'Этапы, задачи, исполнители и затраты проекта',tasks:[],stages:[],people:[],expenses:[],contacts:[],files:[],counts:{images:0,pdf:0,files:0},progress:0,projectId:project.id};
+ state.data.nodes.push(n);state.data.links.push({id:uid(),a:project.id,b:n.id});save();render();toast('Рабочая карточка создана');openDetail(n);return n;
+}
+
 function addExpense(n,name,amount){
  if(!name||!amount)return;n.expenses=n.expenses||[];n.expenses.push({id:uid(),name,amount:Number(String(amount).replace(",",".")),date:Date.now()});save();render();toast("Добавлено в затраты")
 }
@@ -319,8 +401,26 @@ function renderToday(){
  state.data.nodes.forEach(n=>(n.tasks||[]).filter(t=>!t.done).forEach(t=>list.push({...t,parent:n.title,type:n.type})));
  $("#todayList").innerHTML=list.slice(0,30).map(t=>`<div class="list-card"><b>${esc(t.title)}</b><small>${esc(t.parent)}${t.due?" · "+t.due:""}</small></div>`).join("")||"<p>На сегодня ничего не назначено.</p>"
 }
-function renderInbox(){
- $("#inboxList").innerHTML=(state.data.inbox||[]).slice().reverse().map(x=>`<div class="list-card"><b>${esc(x.text)}</b><small>${new Date(x.date).toLocaleString("ru-RU")}</small></div>`).join("")||"<p>Входящие пусты.</p>"
+function renderResults(){
+ const visible=nodes();
+ const allTasks=visible.flatMap(n=>n.tasks||[]);
+ const done=allTasks.filter(t=>t.done).length, open=allTasks.length-done;
+ const projects=visible.filter(n=>n.type==="project").length;
+ const ideas=visible.filter(n=>n.type==="idea").length;
+ const people=visible.filter(n=>n.type==="person").length;
+ const links=state.data.links.filter(l=>nodeById(l.a)?.space===state.space&&nodeById(l.b)?.space===state.space).length;
+ $("#resultsList").innerHTML=`<div class="stats-grid">
+  <div class="stat-card"><small>Проекты</small><b>${projects}</b></div>
+  <div class="stat-card"><small>Люди</small><b>${people}</b></div>
+  <div class="stat-card"><small>Идеи</small><b>${ideas}</b></div>
+  <div class="stat-card"><small>Связи</small><b>${links}</b></div>
+  <div class="stat-card"><small>Выполнено</small><b>${done}</b></div>
+  <div class="stat-card"><small>Открыто</small><b>${open}</b></div>
+ </div>`;
+}
+function renderArchive(){
+ const archived=panelNodeList(n=>n.archived);
+ $("#archiveList").innerHTML=archived.map(n=>`<div class="list-card archive-card"><b>${esc(n.title)}</b><small>${TYPES[n.type]?.label||n.type}</small><button class="ghost archive-restore" data-restore-node="${n.id}">Восстановить</button></div>`).join("")||"<p>Архив пока пуст.</p>"
 }
 function doSearch(q){
  q=q.trim().toLowerCase();if(!q){$("#searchResults").innerHTML="";return}
@@ -351,7 +451,7 @@ async function fullResetApp(){
    if('serviceWorker' in navigator){const regs=await navigator.serviceWorker.getRegistrations();await Promise.all(regs.map(reg=>reg.unregister()))}
    if('indexedDB' in window && indexedDB.databases){const dbs=await indexedDB.databases();dbs.forEach(db=>{if(db.name)indexedDB.deleteDatabase(db.name)})}
  }catch(err){console.error('BOONWAVE reset error',err)}
- location.replace(location.pathname+'?v=5.4.4&reset='+Date.now());
+ location.replace(location.pathname+'?v=5.6.0&reset='+Date.now());
 }
 function closeSheets(){$$(".sheet").forEach(x=>x.classList.add("hidden"));$("#createMenu").classList.add("hidden");$("#contextMenu").classList.add("hidden")}
 
@@ -365,18 +465,22 @@ document.addEventListener("click",e=>{
   if(act==="closeAccountMenu")closeAccountMenu();
   if(act==="logout")logoutAccount();
   if(act==="fullReset")fullResetApp();
-  if(act==="today"){closeSheets();$("#todayPanel").classList.remove("hidden")}
-  if(act==="search"){closeSheets();$("#searchPanel").classList.remove("hidden");$("#searchInput").focus()}
-  if(act==="inbox"){closeSheets();$("#inboxPanel").classList.remove("hidden")}
-  if(act==="closeSheet")closeSheets();
-  if(act==="fit"){state.scale=.72;state.tx=-180;state.ty=-120;applyTransform()}
-  if(act==="saveInbox"){const v=$("#inboxText").value.trim();if(v){state.data.inbox.push({id:uid(),text:v,date:Date.now()});$("#inboxText").value="";save();renderInbox();toast("Сохранено")}}
+  if(act==="tree"){closeSheets();setActivePanel("tree")}
+  if(act==="today"){closeSheets();$("#todayPanel").classList.remove("hidden");setActivePanel("today")}
+  if(act==="results"){closeSheets();renderResults();$("#resultsPanel").classList.remove("hidden");setActivePanel("results")}
+  if(act==="archive"){closeSheets();renderArchive();$("#archivePanel").classList.remove("hidden");setActivePanel("archive")}
+  if(act==="closeSheet"){closeSheets();setActivePanel("tree")}
+  if(act==="fitAll")fitAllNodes();
+  if(act==="centerRoot")focusRoot();
+  if(act==="zoomIn"){state.scale=Math.min(1.55,state.scale*1.12);applyTransform();render()}
+  if(act==="zoomOut"){state.scale=Math.max(.32,state.scale/1.12);applyTransform();render()}
   if(act==="saveNode")saveEditor();
   if(act==="deleteNode")deleteNode();
   if(act==="closeDetail")$("#detail").close();
  }
  const hint=e.target.closest('[data-hint]'); if(hint){openHint(nodeById(hint.dataset.hint)); return;}
  const openNode=e.target.closest("[data-open-node]"); if(openNode){openDetail(nodeById(openNode.dataset.openNode)); return;}
+ const cw=e.target.closest("[data-create-workflow]"); if(cw){createWorkflowForProject(nodeById(cw.dataset.createWorkflow)); return;}
  const editNode=e.target.closest("[data-edit-node]"); if(editNode){openEditor(nodeById(editNode.dataset.editNode)); return;}
  const q=e.target.closest("[data-quick-expense]");if(q){
   const box=q.closest(".quick-expense"),n=nodeById(q.dataset.quickExpense);
@@ -388,12 +492,12 @@ document.addEventListener("click",e=>{
  const pi=e.target.closest("[data-add-image]"); if(pi){pickImages(nodeById(pi.dataset.addImage)); return;}
  const pf=e.target.closest("[data-files]");if(pf)pickFiles(nodeById(pf.dataset.files));
  const sn=e.target.closest("[data-search-node]");if(sn){const n=nodeById(sn.dataset.searchNode);closeSheets();state.space=n.space;focusNode(n)}
+ const restore=e.target.closest("[data-restore-node]"); if(restore){const n=nodeById(restore.dataset.restoreNode); if(n){n.archived=false;save();render();renderArchive();toast("Восстановлено"); return;}}
  if(!e.target.closest(".context-menu,.node"))$("#contextMenu").classList.add("hidden");
  if(!e.target.closest("#accountMenu,[data-action=\"menu\"]")) closeAccountMenu();
 });
 $("#editorForm").addEventListener("submit",e=>{if(e.submitter?.dataset.action==="saveNode")saveEditor()});
-$("#searchInput").addEventListener("input",e=>doSearch(e.target.value));
-$$("[data-space]").forEach(b=>b.onclick=()=>{$$("[data-space]").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.space=b.dataset.space;render()});
+$$("[data-space]").forEach(b=>b.onclick=()=>{$$("[data-space]").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.space=b.dataset.space;closeSheets();setActivePanel("tree");render()});
 
 const wrap=$("#workspaceWrap");
 wrap.addEventListener("pointerdown",e=>{
@@ -420,7 +524,7 @@ window.addEventListener("beforeunload",save);document.addEventListener("visibili
 setInterval(save,30000);
 if("serviceWorker" in navigator){
  window.addEventListener("load",()=>{
-  navigator.serviceWorker.register("sw.js?v=5.4.4",{updateViaCache:"none"}).then(reg=>reg.update()).catch(()=>{});
+  navigator.serviceWorker.register("sw.js?v=5.6.0",{updateViaCache:"none"}).then(reg=>reg.update()).catch(()=>{});
  });
  let refreshing=false;
  navigator.serviceWorker.addEventListener("controllerchange",()=>{if(!refreshing){refreshing=true;location.reload()}})
