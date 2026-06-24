@@ -420,7 +420,7 @@ window.addEventListener("beforeunload",save);document.addEventListener("visibili
 setInterval(save,30000);
 if("serviceWorker" in navigator){
  window.addEventListener("load",()=>{
-  navigator.serviceWorker.register("sw.js?v=5.2.0",{updateViaCache:"none"}).then(reg=>reg.update()).catch(()=>{});
+  navigator.serviceWorker.register("sw.js?v=5.4.2",{updateViaCache:"none"}).then(reg=>reg.update()).catch(()=>{});
  });
  let refreshing=false;
  navigator.serviceWorker.addEventListener("controllerchange",()=>{if(!refreshing){refreshing=true;location.reload()}})

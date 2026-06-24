@@ -309,3 +309,27 @@ html,body{background:#06070c}
 @media (max-width:430px){
   .splash-full-wrap{width:min(68vw,272px);margin-bottom:28px}
 }
+
+
+/* BOONWAVE v5.4.2 — auth logo enlarged, splash unchanged */
+.auth-mark-wrap{
+  height:156px;
+  margin:0 auto 12px;
+  overflow:visible;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.auth-mark{
+  width:min(78vw,360px);
+  height:148px;
+  object-fit:contain;
+  object-position:center;
+  display:block;
+  filter:drop-shadow(0 0 20px rgba(93,92,255,.14));
+}
+.auth-note{display:none !important}
+@media (max-width:430px){
+  .auth-mark-wrap{height:138px;margin-bottom:10px}
+  .auth-mark{width:min(76vw,330px);height:132px}
+}

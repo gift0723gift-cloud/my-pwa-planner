@@ -1,9 +1,9 @@
-const CACHE = "boonwave-workspace-v5.4.1";
+const CACHE = "boonwave-workspace-v5.4.2";
 const CORE = [
   "./",
-  "index.html?v=5.4.1",
-  "styles.css?v=5.4.1",
-  "app.js?v=5.4.1",
+  "index.html?v=5.4.2",
+  "styles.css?v=5.4.2",
+  "app.js?v=5.4.2",
   "manifest.webmanifest",
   "boonwave-approved.png","boonwave-approved-splash.png"
 ];
@@ -30,10 +30,10 @@ self.addEventListener("fetch", event => {
       try {
         const fresh = await fetch(req, { cache: "no-store" });
         const cache = await caches.open(CACHE);
-        cache.put("index.html?v=5.4.1", fresh.clone());
+        cache.put("index.html?v=5.4.2", fresh.clone());
         return fresh;
       } catch {
-        return (await caches.match("index.html?v=5.4.1")) || (await caches.match("./"));
+        return (await caches.match("index.html?v=5.4.2")) || (await caches.match("./"));
       }
     })());
     return;
