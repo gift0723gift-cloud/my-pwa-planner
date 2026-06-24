@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0a0b0f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest?v=5.1">
+  <link rel="stylesheet" href="styles.css?v=5.1">
   <title>BOONWAVE</title>
 </head>
 <body>
@@ -17,7 +17,7 @@
     <div class="splash-orbit orbit-b"></div>
     <div class="splash-dots"></div>
     <div class="splash-content">
-      <div class="splash-mark-wrap"><img src="boonwave-mark.png" alt="BOONWAVE" class="splash-mark"></div>
+      <div class="splash-full-wrap"><img src="boonwave-full.png" alt="BOONWAVE" class="splash-full"></div>
       <p class="splash-tagline">Твоё пространство возможностей</p>
       <div class="splash-progress"><span></span></div>
     </div>
@@ -54,12 +54,12 @@
 
   <div id="app" class="app-hidden">
     <header class="topbar">
-      <div class="brand-cluster"><div class="top-mark"><img src="boonwave-mark.png" alt=""></div><div class="brand-stack"><button class="brand" data-action="home">BOONWAVE</button><small>Твоё пространство возможностей</small></div></div>
+      <div class="brand-cluster"><div class="top-mark"><img src="boonwave-mark.png" alt=""></div><button class="brand-line" data-action="home">Твоё пространство <b>BOONWAVE</b></button></div>
       <div class="space-switch">
         <button data-space="personal">Личное</button>
         <button class="active" data-space="work">Работа</button>
       </div>
-      <button class="icon-btn" data-action="menu" aria-label="Меню">•••</button>
+      <div class="build-mark">V5.1</div><button class="icon-btn" data-action="menu" aria-label="Меню">•••</button>
     </header>
 
     <main id="workspaceWrap">
@@ -70,7 +70,7 @@
         <div class="empty-mark">≈</div>
         <h2>Поле возможностей</h2>
         <p>Начните с проекта, цели, человека или идеи — и пространство оживёт.</p>
-        <div id="addCue" class="add-cue"><div class="cue-v v1"></div><div class="cue-v v2"></div><div class="cue-label">Нажмите +</div></div>
+        <div id="addCue" class="add-cue"><div class="cue-v v1"></div><div class="cue-v v2"></div><div class="cue-v v3"></div><div class="cue-label">Нажмите +</div></div>
       </div>
     </main>
 
@@ -101,13 +101,7 @@
       <button class="primary brand-btn" data-action="enterWorkspace">Перейти в поле возможностей</button>
     </section>
 
-    <nav class="bottom-nav">
-      <button data-action="today"><span>◷</span><small>Сегодня</small></button>
-      <button data-action="search"><span>⌕</span><small>Поиск</small></button>
-      <button class="add-main" data-action="openCreate"><span>＋</span></button>
-      <button data-action="inbox"><span>↓</span><small>Входящие</small></button>
-      <button data-action="fit"><span>◎</span><small>Обзор</small></button>
-    </nav>
+    <nav class="bottom-nav"><button class="add-main only-add" data-action="openCreate"><span>＋</span></button></nav>
 
     <div id="createMenu" class="popover hidden">
       <button data-create="project">Проект</button>
@@ -147,6 +141,6 @@
 
     <input id="filePicker" type="file" multiple hidden>
   </div>
-  <script src="app.js"></script>
+  <script src="app.js?v=5.1"></script>
 </body>
 </html>

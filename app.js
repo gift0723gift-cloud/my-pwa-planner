@@ -43,7 +43,7 @@ const TYPES={
 };
 const state={
  data:null,space:"work",scale:.82,tx:-250,ty:-180,selected:null,editing:null,linkMode:null,
- pointers:new Map(),gesture:null,dragNodeId:null,dragScreen:null
+ pointers:new Map(),gesture:null,dragNodeId:null,dragScreen:null,fileMode:"all"
 };
 const blank=()=>({version:"5-expanded",space:"work",nodes:[],links:[],inbox:[],updated:Date.now()});
 function load(){try{return JSON.parse(localStorage.getItem("boonwave_v5_expanded"))||blank()}catch{return blank()}}
@@ -86,6 +86,27 @@ function typeLevel(n){
  if(state.scale>1.12)return 3;
  return 2
 }
+function iconBadge(icon,label,value){return `<span class="badge icon-badge" title="${label}"><span class="mini-ico">${icon}</span><span>${value}</span></span>`}
+function nodeMetaHTML(n,counts){
+ const openTasks=(n.tasks||[]).filter(t=>!t.done).length;
+ if(n.type==="project") return `<div class="meta meta-strip">${iconBadge('◫','Фото',counts.images||0)}${iconBadge('PDF','PDF',counts.pdf||0)}${iconBadge('⌁','Файлы',counts.files||0)}${iconBadge('◉','Контакты',(n.contacts||[]).length||0)}${iconBadge('✓','Задачи',openTasks)}</div>`;
+ if(n.type==="person") return `<div class="meta meta-strip">${iconBadge('◫','Фото',counts.images||0)}${iconBadge('✆','Связь',Number(!!n.phone)+Number(!!n.email)+Number(!!n.social))}${iconBadge('✓','Задачи',openTasks)}${iconBadge('⌘','Теги',(n.tags||'').split(',').filter(Boolean).length)}</div>`;
+ if(n.type==="idea") return `<div class="meta meta-strip">${iconBadge('◫','Изображения',counts.images||0)}${iconBadge('PDF','PDF',counts.pdf||0)}${iconBadge('⌁','Файлы',counts.files||0)}</div>`;
+ return `<div class="meta meta-strip">${iconBadge('✓','Задачи',openTasks)}${iconBadge('⌁','Файлы',counts.files||0)}</div>`;
+}
+function nodeSecondaryHTML(n){
+ if(n.type==="project") return `<div class="status-row"><span class="state-chip">${esc(n.status||'Подготовка')}</span><span class="state-chip subtle">${esc(n.priority||'Средний')}</span>${n.budget?`<span class="state-chip money">${money(n.budget)}</span>`:''}</div>`;
+ if(n.type==="person") return `<div class="person-line"><b>${esc(n.speciality||'Специалист')}</b><span>${esc(n.zone||'Ближнее поле')}</span></div><div class="person-contacts">${n.phone?`<span>${esc(n.phone)}</span>`:''}${n.email?`<span>${esc(n.email)}</span>`:''}${n.site?`<span>${esc(n.site)}</span>`:''}</div>`;
+ if(n.type==="idea") return `<div class="status-row"><span class="state-chip">${esc(n.source||'Источник')}</span>${n.tags?`<span class="state-chip subtle">${esc(n.tags.split(',')[0].trim())}</span>`:''}</div>`;
+ if(n.type==="goal") return `<div class="status-row">${n.deadline?`<span class="state-chip">до ${esc(n.deadline)}</span>`:''}<span class="state-chip subtle">${n.progress||0}%</span></div>`;
+ return '';
+}
+function nodeQuickHTML(n){
+ if(n.type==="project") return `<div class="card-actions"><button class="mini-action accent" data-add-image="${n.id}">3 Фото</button><button class="mini-action" data-files="${n.id}">6 Файл</button><button class="mini-action" data-open-node="${n.id}">1 Смотреть</button><button class="mini-action" data-edit-node="${n.id}">31 Изм.</button></div>`;
+ if(n.type==="person") return `<div class="card-actions"><button class="mini-action accent" data-add-image="${n.id}">3 Фото</button><button class="mini-action" data-open-node="${n.id}">1 Смотреть</button><button class="mini-action" data-edit-node="${n.id}">31 Изм.</button></div>`;
+ if(n.type==="idea") return `<div class="card-actions"><button class="mini-action accent" data-add-image="${n.id}">3 Изобр.</button><button class="mini-action" data-open-node="${n.id}">1 Смотреть</button></div>`;
+ return `<div class="card-actions"><button class="mini-action" data-open-node="${n.id}">1 Смотреть</button><button class="mini-action" data-edit-node="${n.id}">31 Изм.</button></div>`;
+}
 function applyTransform(){
  const t=`translate(${state.tx}px,${state.ty}px) scale(${state.scale})`;
  $("#workspace").style.transform=t;$("#links").style.transform=t;renderLinks();renderDotField()
@@ -117,6 +138,7 @@ function render(){
       <input class="expense-value" inputmode="decimal" placeholder="Сумма">
       <button data-quick-expense="${n.id}">➤</button>
     </div>
+    ${n.type==="project"?`<div class="quick-photo"><button class="photo-btn primary-lite" data-add-image="${n.id}">＋ Фото</button><button class="photo-btn" data-files="${n.id}">Файл</button></div>`:""}
   </div>`;
   attachNodeEvents(el,n);ws.appendChild(el)
  });
@@ -184,6 +206,8 @@ function fieldsFor(n){
  <div class="field"><label>Адрес объекта</label><input name="address" value="${esc(n.address||"")}"></div></div>
  <div class="field-grid"><div class="field"><label>Статус</label><select name="status"><option>Подготовка</option><option>В работе</option><option>На паузе</option><option>Завершён</option></select></div>
  <div class="field"><label>Приоритет</label><select name="priority"><option>Высокий</option><option>Средний</option><option>Низкий</option></select></div></div>
+ <div class="field-grid"><div class="field"><label>Количество позиций</label><input name="positions" inputmode="numeric" value="${n.positions||""}"></div>
+ <div class="field"><label>Дата подписания</label><input type="date" name="signDate" value="${n.signDate||""}"></div></div>
  <div class="field-grid"><div class="field"><label>Бюджет</label><input name="budget" inputmode="decimal" value="${n.budget||""}"></div>
  <div class="field"><label>Аванс</label><input name="advance" inputmode="decimal" value="${n.advance||""}"></div></div>
  <div class="field-grid"><div class="field"><label>Остаток</label><input name="balance" inputmode="decimal" value="${n.balance||""}"></div>
@@ -241,13 +265,27 @@ function addTask(n){
  const title=prompt("Новая задача");if(!title)return;
  n.tasks.push({id:uid(),title,done:false,due:""});save();render();toast("Задача добавлена")
 }
-function pickFiles(n){state.fileTarget=n.id;$("#filePicker").click()}
+function pickFiles(n){state.fileTarget=n.id;state.fileMode="all";const fp=$("#filePicker");fp.accept="";fp.click()}
+function pickImages(n){state.fileTarget=n.id;state.fileMode="image";const fp=$("#filePicker");fp.accept="image/*";fp.click()}
 $("#filePicker").addEventListener("change",e=>{
  const n=nodeById(state.fileTarget);if(!n)return;
- [...e.target.files].forEach(f=>{
+ const files=[...e.target.files];
+ let pending=0;
+ files.forEach(f=>{
   n.files.push({id:uid(),name:f.name,type:f.type,size:f.size});
-  if(f.type.startsWith("image/"))n.counts.images++;else if(f.type==="application/pdf")n.counts.pdf++;else n.counts.files++
- });save();render();toast("Файлы добавлены");e.target.value=""
+  if(f.type.startsWith("image/")){
+    n.counts.images++;
+    if(!n.image){
+      pending++;
+      const reader=new FileReader();
+      reader.onload=()=>{n.image=reader.result; pending--; save(); render(); if(!pending) toast("Фото добавлено")};
+      reader.readAsDataURL(f);
+    }
+  }else if(f.type==="application/pdf")n.counts.pdf++;else n.counts.files++
+ });
+ save();render();
+ if(!(files.some(f=>f.type.startsWith("image/") && !n.image))) toast(state.fileMode==="image"?"Фото добавлено":"Файлы добавлены");
+ e.target.value=""; e.target.accept=""; state.fileMode="all";
 });
 function openDetail(n){
  $("#detailType").textContent=TYPES[n.type]?.label||n.type;$("#detailTitle").textContent=n.title;
@@ -269,7 +307,7 @@ function openDetail(n){
  if(n.type==="idea")body+=`<section class="detail-section"><h3>Почему сохранено</h3><p>${esc(n.why||"")}</p><p>${esc(n.source||"")} · ${esc(n.url||"")}</p></section>`;
  body+=`<section class="detail-section"><h3>Задачи</h3><div id="detailTasks">${(n.tasks||[]).map(t=>`<label class="task-row"><input type="checkbox" data-task="${t.id}" ${t.done?"checked":""}><span>${esc(t.title)}</span></label>`).join("")||"<p>Нет задач</p>"}
  <button class="ghost" data-add-task="${n.id}">＋ Добавить задачу</button></div></section>
- <section class="detail-section"><h3>Материалы</h3><div class="file-row">${(n.files||[]).map(f=>`<div class="file-tile">${esc(f.name)}</div>`).join("")||"<p>Файлы не добавлены</p>"}</div><button class="ghost" data-files="${n.id}">＋ Файл</button></section>`;
+ <section class="detail-section"><h3>Материалы</h3><div class="file-row">${(n.files||[]).map(f=>`<div class="file-tile">${esc(f.name)}</div>`).join("")||"<p>Файлы не добавлены</p>"}</div><button class="ghost" data-add-image="${n.id}">＋ Фото</button> <button class="ghost" data-files="${n.id}">＋ Файл</button></section>`;
  if(n.type==="project")body+=`<section class="detail-section"><h3>Таблица затрат</h3>${(n.expenses||[]).map(e=>`<div class="list-card"><b>${esc(e.name)}</b><small>${money(e.amount)} · ${new Date(e.date).toLocaleDateString("ru-RU")}</small></div>`).join("")||"<p>Затрат пока нет</p>"}</section>`;
  $("#detailBody").innerHTML=body;$("#detail").showModal()
 }
@@ -309,6 +347,8 @@ document.addEventListener("click",e=>{
   if(act==="closeDetail")$("#detail").close();
  }
  const hint=e.target.closest('[data-hint]'); if(hint){openHint(nodeById(hint.dataset.hint)); return;}
+ const openNode=e.target.closest("[data-open-node]"); if(openNode){openDetail(nodeById(openNode.dataset.openNode)); return;}
+ const editNode=e.target.closest("[data-edit-node]"); if(editNode){openEditor(nodeById(editNode.dataset.editNode)); return;}
  const q=e.target.closest("[data-quick-expense]");if(q){
   const box=q.closest(".quick-expense"),n=nodeById(q.dataset.quickExpense);
   addExpense(n,box.querySelector(".expense-name").value,box.querySelector(".expense-value").value);
@@ -316,6 +356,7 @@ document.addEventListener("click",e=>{
  }
  const de=e.target.closest("[data-detail-expense]");if(de){const n=nodeById(de.dataset.detailExpense);addExpense(n,$("#detailExpenseName").value,$("#detailExpenseAmount").value);openDetail(n)}
  const at=e.target.closest("[data-add-task]");if(at){const n=nodeById(at.dataset.addTask);$("#detail").close();addTask(n);openDetail(n)}
+ const pi=e.target.closest("[data-add-image]"); if(pi){pickImages(nodeById(pi.dataset.addImage)); return;}
  const pf=e.target.closest("[data-files]");if(pf)pickFiles(nodeById(pf.dataset.files));
  const sn=e.target.closest("[data-search-node]");if(sn){const n=nodeById(sn.dataset.searchNode);closeSheets();state.space=n.space;focusNode(n)}
  if(!e.target.closest(".context-menu,.node"))$("#contextMenu").classList.add("hidden")
@@ -329,15 +370,15 @@ wrap.addEventListener("pointerdown",e=>{
  if(e.target.closest(".node,.bottom-nav,.topbar,.sheet,dialog"))return;
  closeSheets();wrap.setPointerCapture(e.pointerId);state.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
  if(state.pointers.size===1)state.gesture={mode:"pan",sx:e.clientX,sy:e.clientY,tx:state.tx,ty:state.ty};
- if(state.pointers.size===2){const p=[...state.pointers.values()];state.gesture={mode:"pinch",dist:Math.hypot(p[1].x-p[0].x,p[1].y-p[0].y),scale:state.scale,tx:state.tx,ty:state.ty}}
+ if(state.pointers.size===2){const p=[...state.pointers.values()];const mx=(p[0].x+p[1].x)/2,my=(p[0].y+p[1].y)/2;state.gesture={mode:"pinch",dist:Math.hypot(p[1].x-p[0].x,p[1].y-p[0].y),scale:state.scale,tx:state.tx,ty:state.ty,mx,my,worldX:(mx-state.tx)/state.scale,worldY:(my-state.ty)/state.scale}}
 });
 wrap.addEventListener("pointermove",e=>{
  if(!state.pointers.has(e.pointerId))return;state.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
  if(state.pointers.size===1&&state.gesture?.mode==="pan"){state.tx=state.gesture.tx+e.clientX-state.gesture.sx;state.ty=state.gesture.ty+e.clientY-state.gesture.sy;applyTransform()}
- if(state.pointers.size===2&&state.gesture?.mode==="pinch"){const p=[...state.pointers.values()],d=Math.hypot(p[1].x-p[0].x,p[1].y-p[0].y);state.scale=Math.max(.32,Math.min(1.55,state.gesture.scale*d/state.gesture.dist));applyTransform();render()}
+ if(state.pointers.size===2&&state.gesture?.mode==="pinch"){const p=[...state.pointers.values()],d=Math.hypot(p[1].x-p[0].x,p[1].y-p[0].y),midX=(p[0].x+p[1].x)/2,midY=(p[0].y+p[1].y)/2;const newScale=Math.max(.32,Math.min(1.55,state.gesture.scale*d/state.gesture.dist));state.scale=newScale;state.tx=midX-state.gesture.worldX*newScale;state.ty=midY-state.gesture.worldY*newScale;applyTransform();render()}
 });
-wrap.addEventListener("pointerup",e=>state.pointers.delete(e.pointerId));
-wrap.addEventListener("pointercancel",e=>state.pointers.delete(e.pointerId));
+wrap.addEventListener("pointerup",e=>{state.pointers.delete(e.pointerId); if(state.pointers.size<2 && state.gesture?.mode==="pinch") state.gesture=null;});
+wrap.addEventListener("pointercancel",e=>{state.pointers.delete(e.pointerId); if(state.pointers.size<2 && state.gesture?.mode==="pinch") state.gesture=null;});
 wrap.addEventListener("dblclick",e=>{if(e.target===wrap||e.target===$("#workspace")){state.scale=.72;state.tx=-180;state.ty=-120;render()}});
 wrap.addEventListener("click",e=>{
  if(state.linkMode&&e.target.closest(".node")){const b=e.target.closest(".node").dataset.id;if(b!==state.linkMode){state.data.links.push({id:uid(),a:state.linkMode,b});save();toast("Связь создана")}state.linkMode=null;render()}
@@ -348,7 +389,13 @@ $("#detailBody").addEventListener("change",e=>{
 window.addEventListener("beforeunload",save);document.addEventListener("visibilitychange",()=>{if(document.hidden)save()});
 setInterval(save,30000);
 if("serviceWorker" in navigator){
- navigator.serviceWorker.register("sw.js");
- let refreshing=false;navigator.serviceWorker.addEventListener("controllerchange",()=>{if(!refreshing){refreshing=true;location.reload()}})
+ navigator.serviceWorker.register("sw.js?v=5.1",{updateViaCache:"none"}).then(reg=>{
+   reg.update();
+   setInterval(()=>reg.update(),60000);
+ });
+ let refreshing=false;
+ navigator.serviceWorker.addEventListener("controllerchange",()=>{
+   if(!refreshing){refreshing=true;location.reload()}
+ });
 }
 render();
