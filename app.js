@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.2-safe";
+const VERSION = "6.0.0";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
 const DATA_PREFIX = "boonwave_v6_data_";
@@ -430,18 +430,6 @@ function nodeSubtitle(node) {
   return node.metric || (node.deadline ? `до ${node.deadline}` : "Личная цель");
 }
 function visualIcon(node) { return icon(node.type === "process" ? "process" : node.type); }
-function coverBgStyle(node) {
-  const scale = Number(node.coverScale || 1);
-  const x = Number(node.coverOffsetX || 0);
-  const y = Number(node.coverOffsetY || 0);
-  return `background-size:${Math.max(.2, scale) * 100}% auto;background-position:calc(50% + ${x}px) calc(50% + ${y}px);background-repeat:no-repeat;`;
-}
-function applyCoverStyle(element, node) {
-  if (!element || !node) return;
-  element.style.backgroundSize = `${Math.max(.2, Number(node.coverScale || 1)) * 100}% auto`;
-  element.style.backgroundPosition = `calc(50% + ${Number(node.coverOffsetX || 0)}px) calc(50% + ${Number(node.coverOffsetY || 0)}px)`;
-  element.style.backgroundRepeat = "no-repeat";
-}
 function metricHtml(iconName, value) { return `<span class="metric">${icon(iconName)}<span>${esc(value)}</span></span>`; }
 function nodeMetrics(node) {
   if (node.type === "project") {
@@ -468,7 +456,7 @@ function renderCards() {
     const progress = Number(node.progress || (node.type === "project" ? 0 : 0));
     article.innerHTML = `
       <div class="card-shell">
-        <div class="card-visual" ${cover} style="${cover ? coverBgStyle(node) : ''}">
+        <div class="card-visual" ${cover}>
           <div class="card-visual-placeholder">${visualIcon(node)}</div>
           <span class="card-type-pill">${esc(TYPE_LABELS[node.type].toUpperCase())}</span>
           <span class="card-status-dot"></span>
@@ -496,7 +484,7 @@ async function hydrateCardCovers() {
     const id = visual.dataset.coverId;
     const url = await assetUrl(id).catch(() => null);
     if (url && visual.isConnected) {
-      visual.style.backgroundImage = `url("${url}")`; applyCoverStyle(visual, nodeById(visual.closest(".node-card")?.dataset.id));
+      visual.style.backgroundImage = `url("${url}")`;
       visual.querySelector(".card-visual-placeholder")?.remove();
     }
   }
@@ -852,7 +840,7 @@ function renderDetailBody(node) {
   hydrateDetailAssets(node);
 }
 function heroHtml(node, subtitle) {
-  return `<div class="detail-hero" ${node.coverAssetId ? `data-detail-cover="${esc(node.coverAssetId)}" style="${coverBgStyle(node)}"` : ""}><div class="detail-hero-content"><h3>${esc(node.title)}</h3><p>${esc(subtitle || nodeSubtitle(node))}</p></div></div>`;
+  return `<div class="detail-hero" ${node.coverAssetId ? `data-detail-cover="${esc(node.coverAssetId)}"` : ""}><div class="detail-hero-content"><h3>${esc(node.title)}</h3><p>${esc(subtitle || nodeSubtitle(node))}</p></div></div>`;
 }
 function projectDetailHtml(node) {
   const process = state.data.nodes.find(item => item.type === "process" && item.projectId === node.id && !item.archived);
@@ -915,7 +903,7 @@ async function hydrateDetailAssets(node) {
   const detailCover = $('[data-detail-cover]', $("#detailBody"));
   if (detailCover) {
     const url = await assetUrl(detailCover.dataset.detailCover).catch(() => null);
-    if (url && detailCover.isConnected) detailCover.style.backgroundImage = `url("${url}")`; applyCoverStyle(detailCover, node);
+    if (url && detailCover.isConnected) detailCover.style.backgroundImage = `url("${url}")`;
   }
   for (const tile of $$('[data-asset-id]', $("#detailBody"))) {
     const asset = (node.assets || []).find(item => item.id === tile.dataset.assetId);
@@ -1003,8 +991,7 @@ function renderEditorBody() {
     <div class="field-grid"><div class="field"><label>Количество позиций</label><input name="positions" inputmode="numeric" value="${esc(d.positions || "")}"></div><div class="field"><label>Дата подписания</label><input name="signDate" type="date" value="${esc(d.signDate || "")}"></div></div>
     <div class="field-grid"><div class="field"><label>Бюджет</label><input name="budget" inputmode="decimal" value="${esc(d.budget || "")}"></div><div class="field"><label>Срок</label><input name="deadline" type="date" value="${esc(d.deadline || "")}"></div></div>
     <div class="field-grid"><div class="field"><label>Аванс</label><input name="advance" inputmode="decimal" value="${esc(d.advance || "")}"></div><div class="field"><label>Остаток</label><input name="balance" inputmode="decimal" value="${esc(d.balance || "")}"></div></div>
-    <div class="editor-group materials-editor"><h3>Основные материалы</h3><button type="button" class="ghost" data-editor-action="addAssets">＋ Изображения, PDF и векторные файлы</button></div>
-    ${coverEditorHtml(d)}`;
+    <div class="editor-group"><h3>Основные материалы</h3><button type="button" class="ghost" data-editor-action="addAssets">＋ Изображения, PDF и векторные файлы</button></div>`;
   if (d.type === "person") html += `
     <div class="field"><label>Специализация</label><input name="speciality" value="${esc(d.speciality || "")}"></div>
     <div class="field"><label>Навыки, материалы, ключевые слова</label><input name="tags" value="${esc(d.tags || "")}"></div>
@@ -1020,21 +1007,6 @@ function renderEditorBody() {
   if (d.type === "process") html += processEditorHtml(d);
   $("#editorBody").innerHTML = html;
   bindEditorDynamicActions();
-}
-function coverEditorHtml(d) {
-  const images = (d.assets || []).filter(asset => String(asset.type || "").startsWith("image/"));
-  if (!images.length) return `<div class="editor-group cover-editor"><h3>Заглавное изображение</h3><div class="cover-empty">Добавьте изображение в материалы проекта — оно станет обложкой.</div></div>`;
-  if (!d.coverAssetId || !images.some(asset => asset.id === d.coverAssetId)) d.coverAssetId = images[0].id;
-  const scale = Math.max(1, Number(d.coverScale || 1));
-  const x = Number(d.coverOffsetX || 0);
-  const y = Number(d.coverOffsetY || 0);
-  return `<div class="editor-group cover-editor"><h3>Заглавное изображение</h3>
-    <div class="cover-preview" data-cover-preview="${esc(d.coverAssetId)}" aria-label="Предпросмотр позиционирования обложки"><img class="cover-preview-img" alt="" style="transform:translate(${x}px, ${y}px) scale(${scale});"><span class="cover-preview-hint">Перетащите изображение для позиционирования</span></div>
-    <div class="field"><label>Выбрать изображение</label><select name="coverAssetId" id="coverAssetSelect">${images.map(asset => `<option value="${asset.id}" ${asset.id === d.coverAssetId ? "selected" : ""}>${esc(asset.name || "Изображение")}</option>`).join("")}</select></div>
-    <div class="field-grid"><div class="field"><label>Масштаб</label><input id="coverScaleRange" type="range" min="1" max="2.5" step="0.01" value="${scale}"></div><div class="field"><label>Позиция X</label><input id="coverOffsetXRange" type="range" min="-180" max="180" step="1" value="${x}"></div></div>
-    <div class="field"><label>Позиция Y</label><input id="coverOffsetYRange" type="range" min="-140" max="140" step="1" value="${y}"></div>
-    <div class="cover-tools"><button type="button" class="ghost" data-editor-action="coverFit">По размеру</button><button type="button" class="ghost" data-editor-action="coverFill">Заполнить</button><button type="button" class="ghost" data-editor-action="coverReset">Сбросить позицию</button></div>
-  </div>`;
 }
 function processEditorHtml(d) {
   const people = state.data.nodes.filter(node => node.type === "person" && node.space === d.space && !node.archived);
@@ -1052,9 +1024,6 @@ function bindEditorDynamicActions() {
     if (action === "addStage") { state.editDraft.stages ||= []; state.editDraft.stages.push({ id: uid(), title: "Новый этап", progress: 0, deadline: "" }); renderEditorBody(); }
     if (action === "addTask") { state.editDraft.tasks ||= []; state.editDraft.tasks.push({ id: uid(), title: "Новая задача", due: "", done: false, personId: "" }); renderEditorBody(); }
     if (action === "addExpense") { state.editDraft.expenses ||= []; state.editDraft.expenses.push({ id: uid(), title: "Новая затрата", amount: "", date: todayISO() }); renderEditorBody(); }
-    if (action === "coverFit") { state.editDraft.coverScale = 1; state.editDraft.coverOffsetX = 0; state.editDraft.coverOffsetY = 0; renderEditorBody(); }
-    if (action === "coverFill") { state.editDraft.coverScale = 1.18; state.editDraft.coverOffsetX = 0; state.editDraft.coverOffsetY = 0; renderEditorBody(); }
-    if (action === "coverReset") { state.editDraft.coverScale = 1; state.editDraft.coverOffsetX = 0; state.editDraft.coverOffsetY = 0; renderEditorBody(); }
     const stageId = event.target.closest("[data-remove-stage]")?.dataset.removeStage;
     const taskId = event.target.closest("[data-remove-task]")?.dataset.removeTask;
     const expenseId = event.target.closest("[data-remove-expense]")?.dataset.removeExpense;
@@ -1062,58 +1031,6 @@ function bindEditorDynamicActions() {
     if (taskId) { state.editDraft.tasks = state.editDraft.tasks.filter(item => item.id !== taskId); renderEditorBody(); }
     if (expenseId) { state.editDraft.expenses = state.editDraft.expenses.filter(item => item.id !== expenseId); renderEditorBody(); }
   };
-  ["coverScaleRange","coverOffsetXRange","coverOffsetYRange","coverAssetSelect"].forEach(id => {
-    const el = document.getElementById(id); if (!el) return;
-    el.oninput = () => {
-      state.editDraft.coverScale = Number($("#coverScaleRange")?.value || state.editDraft.coverScale || 1);
-      state.editDraft.coverOffsetX = Number($("#coverOffsetXRange")?.value || 0);
-      state.editDraft.coverOffsetY = Number($("#coverOffsetYRange")?.value || 0);
-      state.editDraft.coverAssetId = $("#coverAssetSelect")?.value || state.editDraft.coverAssetId;
-      hydrateEditorCoverPreview();
-    };
-  });
-  hydrateEditorCoverPreview();
-}
-function applyEditorCoverPreviewTransform() {
-  const img = $(".cover-preview-img", $("#editorBody"));
-  if (!img || !state.editDraft) return;
-  const scale = Math.max(1, Number(state.editDraft.coverScale || 1));
-  const x = Number(state.editDraft.coverOffsetX || 0);
-  const y = Number(state.editDraft.coverOffsetY || 0);
-  img.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
-}
-function bindEditorCoverDrag() {
-  const preview = $("[data-cover-preview]", $("#editorBody"));
-  if (!preview || preview.dataset.dragBound === "1") return;
-  preview.dataset.dragBound = "1";
-  let start = null;
-  preview.addEventListener("pointerdown", event => {
-    if (!state.editDraft) return;
-    event.preventDefault();
-    preview.setPointerCapture?.(event.pointerId);
-    start = { x: event.clientX, y: event.clientY, ox: Number(state.editDraft.coverOffsetX || 0), oy: Number(state.editDraft.coverOffsetY || 0) };
-  });
-  preview.addEventListener("pointermove", event => {
-    if (!start || !state.editDraft) return;
-    state.editDraft.coverOffsetX = clamp(Math.round(start.ox + event.clientX - start.x), -180, 180);
-    state.editDraft.coverOffsetY = clamp(Math.round(start.oy + event.clientY - start.y), -140, 140);
-    const xRange = $("#coverOffsetXRange"); if (xRange) xRange.value = state.editDraft.coverOffsetX;
-    const yRange = $("#coverOffsetYRange"); if (yRange) yRange.value = state.editDraft.coverOffsetY;
-    applyEditorCoverPreviewTransform();
-  });
-  const end = () => { start = null; };
-  preview.addEventListener("pointerup", end);
-  preview.addEventListener("pointercancel", end);
-}
-async function hydrateEditorCoverPreview() {
-  const preview = $("[data-cover-preview]", $("#editorBody"));
-  const img = $(".cover-preview-img", $("#editorBody"));
-  if (!preview || !img || !state.editDraft?.coverAssetId) return;
-  const url = await assetUrl(state.editDraft.coverAssetId).catch(() => null);
-  if (!url || !preview.isConnected) return;
-  img.src = url;
-  applyEditorCoverPreviewTransform();
-  bindEditorCoverDrag();
 }
 function syncDraftDynamicFields() {
   const d = state.editDraft; if (!d || d.type !== "process") return;
@@ -1157,11 +1074,11 @@ async function handleAssetFiles(event) {
     const metadata = { id, name: file.name, type: file.type || guessMime(file.name), size: file.size, createdAt: Date.now() };
     await putAsset({ ...metadata, blob: file });
     node.assets.push(metadata);
-    if (!node.coverAssetId && metadata.type.startsWith("image/")) { node.coverAssetId = id; node.coverScale = 1; node.coverOffsetX = 0; node.coverOffsetY = 0; }
+    if (!node.coverAssetId && metadata.type.startsWith("image/")) node.coverAssetId = id;
   }
   saveData(); render();
   if ($("#detailDialog").open && state.activeNodeId === node.id) renderDetailBody(node);
-  if ($("#editorDialog").open && state.activeNodeId === node.id) { state.editDraft.assets = clone(node.assets); state.editDraft.coverAssetId = node.coverAssetId; state.editDraft.coverScale = node.coverScale || 1; state.editDraft.coverOffsetX = node.coverOffsetX || 0; state.editDraft.coverOffsetY = node.coverOffsetY || 0; }
+  if ($("#editorDialog").open && state.activeNodeId === node.id) { state.editDraft.assets = clone(node.assets); state.editDraft.coverAssetId = node.coverAssetId; }
   toast(`Добавлено файлов: ${files.length}`);
 }
 function guessMime(name) {
@@ -1211,7 +1128,7 @@ async function deleteCurrentAsset() {
   if (!confirm(`Удалить «${current.asset.name}»?`)) return;
   await deleteAssetRecord(current.asset.id); releaseObjectUrl(current.asset.id);
   current.node.assets.splice(state.assetViewerIndex, 1);
-  if (current.node.coverAssetId === current.asset.id) { current.node.coverAssetId = current.node.assets.find(item => item.type.startsWith("image/"))?.id || ""; current.node.coverScale = 1; current.node.coverOffsetX = 0; current.node.coverOffsetY = 0; }
+  if (current.node.coverAssetId === current.asset.id) current.node.coverAssetId = current.node.assets.find(item => item.type.startsWith("image/"))?.id || "";
   saveData(); render();
   if (!current.node.assets.length) $("#assetViewer").close();
   else { state.assetViewerIndex = clamp(state.assetViewerIndex, 0, current.node.assets.length - 1); renderAssetViewer(); }
