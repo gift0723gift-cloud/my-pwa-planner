@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.12";
+const VERSION = "6.0.13";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -485,11 +485,20 @@ function bindWorkspaceOnce() {
       openBudgetEditor(node);
     }
   });
-  $("#detailBody").addEventListener("dblclick", event => { const badge=event.target.closest("[data-messenger-contact][data-messenger-type]"); if(!badge)return; event.preventDefault(); event.stopPropagation(); const node=nodeById(state.activeNodeId); const contact=(node?.phonebook||[]).find(item=>item.id===badge.dataset.messengerContact); if(contact)openMessengerAction(contact,badge.dataset.messengerType); });
+  $("#detailBody").addEventListener("dblclick", event => { const badge=event.target.closest("[data-messenger-contact][data-messenger-type]"); if(!badge)return; event.preventDefault(); event.stopPropagation(); if(badge.dataset.messengerActive!=="1")return; const node=nodeById(state.activeNodeId); const contact=(node?.phonebook||[]).find(item=>item.id===badge.dataset.messengerContact); if(contact)openMessengerAction(contact,badge.dataset.messengerType); });
   $("#budgetEditValue").addEventListener("input", formatBudgetEditorInput);
   $("#phonebookClose").addEventListener("click", closePhonebook);
   $("#phonebookAdd").addEventListener("click", () => renderPhonebookEditor(null));
   $("#phonebookBody").addEventListener("click", handlePhonebookClick);
+  $("#phonebookBody").addEventListener("dblclick", event => {
+    const badge = event.target.closest("[data-messenger-contact][data-messenger-type]");
+    if (!badge || badge.dataset.messengerActive !== "1") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const node = nodeById(state.activeNodeId);
+    const contact = (node?.phonebook || []).find(item => item.id === badge.dataset.messengerContact);
+    if (contact) openMessengerAction(contact, badge.dataset.messengerType);
+  });
   $("#phonebookEditorForm").addEventListener("submit", savePhonebookContact);
   $("#phonebookEditorCancel").addEventListener("click", () => renderPhonebookList(nodeById(state.activeNodeId)));
   $("#phonebookMessengers").addEventListener("click", handleMessengerPickerClick);
@@ -1040,7 +1049,14 @@ function selectedStageTasksHtml(node) {
 function priorityLabel(priority) { return priority === "high" ? "Высокий" : priority === "low" ? "Низкий" : "Средний"; }
 function formatTaskDateTime(value){if(!value)return "—";const date=new Date(value);if(Number.isNaN(date.getTime()))return String(value).replace("T"," ");return new Intl.DateTimeFormat("ru-RU",{hour:"2-digit",minute:"2-digit",day:"2-digit",month:"long",year:"numeric"}).format(date).replace(",","");}
 function messengerLabel(type){return type==="telegram"?"Telegram":type==="whatsapp"?"WhatsApp":"MAX";}
-function messengerBadges(contact){const selected=Array.isArray(contact?.messengers)?contact.messengers:[];if(!selected.length)return "";return `<span class="messenger-badges">${["telegram","whatsapp","max"].map(type=>`<button type="button" class="messenger-badge ${selected.includes(type)?"selected":"muted"}" data-messenger-contact="${esc(contact.id)}" data-messenger-type="${type}" aria-label="${messengerLabel(type)}">${type==="telegram"?"T":type==="whatsapp"?"W":"M"}</button>`).join("")}</span>`;}
+function messengerIcon(type){
+  const common='viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
+  if(type==="telegram")return `<svg ${common}><path d="M4.5 11.5 19.2 5.2c.8-.3 1.4.3 1.2 1.1l-2.5 12c-.2.9-.9 1.2-1.6.7l-4.1-3.1-2 2c-.3.3-.7.1-.8-.3l.2-4.2 7.4-6.5-9 5.5-3.5-1.1Z"/></svg>`;
+  if(type==="whatsapp")return `<svg ${common}><path d="M20 11.8a8 8 0 0 1-11.9 7L4 20l1.3-4A8 8 0 1 1 20 11.8Z"/><path d="M9.1 8.5c.2-.4.5-.5.9-.4l.8.2.9 2.1c.1.3 0 .6-.2.8l-.8.8c.8 1.4 1.9 2.5 3.4 3.2l.9-.9c.2-.2.5-.3.8-.1l2 .9c.3.1.4.4.4.7-.1.9-.6 1.7-1.4 2.1-1 .5-2.4.2-3.6-.4-1.6-.8-3.1-2.1-4.2-3.6-1-1.4-1.7-3.2-1.2-4.5.2-.4.6-.7 1.3-.9Z"/></svg>`;
+  return `<svg ${common}><path d="M20 11.8a8 8 0 0 1-11.9 7L4 20l1.3-4A8 8 0 1 1 20 11.8Z"/><path d="M8.5 15.5V9l3.5 4 3.5-4v6.5"/></svg>`;
+}
+function messengerBadgeButton(contact,type,selected){const active=selected.includes(type);return `<button type="button" class="messenger-badge ${active?"selected":"muted"}" data-messenger-contact="${esc(contact.id)}" data-messenger-type="${type}" data-messenger-active="${active?"1":"0"}" aria-label="${messengerLabel(type)}${active?", активен":", не активен"}" aria-disabled="${active?"false":"true"}">${messengerIcon(type)}</button>`;}
+function messengerBadges(contact){const selected=Array.isArray(contact?.messengers)?contact.messengers:[];return `<span class="messenger-badges">${["telegram","whatsapp","max"].map(type=>messengerBadgeButton(contact,type,selected)).join("")}</span>`;}
 function stageTaskHtml(node, task) {
   const expanded = task.id === state.expandedProcessTaskId;
   const contacts = (task.contactIds || []).map(id => (node.phonebook || []).find(contact => contact.id === id)).filter(Boolean);
