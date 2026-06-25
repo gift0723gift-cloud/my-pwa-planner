@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.25";
+const VERSION = "6.0.26";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -107,6 +107,8 @@ const state = {
   taskArchivePending: null,
   taskArchiveTap: { id: null, time: 0 },
   taskArchiveExpandedId: null,
+  expenseSelectionMode: false,
+  selectedExpenseIds: new Set(),
   phonebookEditId: null,
   phonebookRelationsContactId: null,
   detailScrollTop: 0,
@@ -457,6 +459,9 @@ function bindWorkspaceOnce() {
   });
   $("#detailBranchButton").addEventListener("click", () => {
     const node = nodeById(state.activeNodeId); if (node) createBranchFor(node);
+  });
+  $("#detailTaskArchiveButton")?.addEventListener("click", () => {
+    const node = nodeById(state.activeNodeId); if (node?.type === "process") openTaskArchive(node);
   });
   $("#editorForm").addEventListener("submit", saveEditor);
   $$('[data-editor-close]').forEach(button => button.addEventListener("click", closeEditor));
@@ -991,6 +996,7 @@ function openDetail(node) {
   state.processActionsUnlocked = node.type !== "process";
   $("#detailType").textContent = TYPE_LABELS[node.type].toUpperCase();
   $("#detailTitle").textContent = node.title || TYPE_LABELS[node.type];
+  state.expenseSelectionMode=false; state.selectedExpenseIds.clear();
   $("#detailBranchButton").textContent = node.type === "project" ? "Рабочий процесс" : "Создать ветвь";
   updateProcessActionLock(node);
   renderDetailBody(node);
@@ -1066,9 +1072,9 @@ function processDetailHtml(node) {
       <button type="button" class="process-phonebook-button interactive-metric" data-detail-action="phonebook" aria-label="Роли. Открыть телефонную книгу"><small>РОЛИ</small><b>${(node.phonebook||[]).length}</b></button>
     </div>
     <div class="process-progress-row"><div><small>ПРОГРЕСС</small><b>${node.progress || 0}%</b></div><i><span style="width:${clamp(node.progress||0,0,100)}%"></span></i></div>
-    <div class="detail-section"><div class="detail-section-head"><h3>Этапы</h3><div class="stage-heading-actions"><button class="task-archive-open-button" data-detail-action="taskArchive" aria-label="Открыть общий архив задач" title="Общий архив">${icon("archiveList")}</button><button class="delicate-plus" data-detail-action="addStage" aria-label="Создать новый этап">＋</button></div></div><div class="stage-list process-stage-selector">${stages.length ? stages.map(stage => stageSelectorHtml(stage)).join("") : `<div class="note-block">Этапы ещё не добавлены.</div>`}</div></div>
+    <div class="detail-section"><div class="detail-section-head"><h3>Этапы</h3><div class="stage-heading-actions"><button class="delicate-plus" data-detail-action="addStage" aria-label="Создать новый этап">＋</button></div></div><div class="stage-list process-stage-selector">${stages.length ? stages.map(stage => stageSelectorHtml(stage)).join("") : `<div class="note-block">Этапы ещё не добавлены.</div>`}</div></div>
     ${selectedStageTasksHtml(node)}
-    <div class="detail-section"><div class="detail-section-head"><h3>Затраты</h3><button data-detail-action="editNode">Таблица</button></div><div class="inline-add"><input id="detailExpenseTitle" placeholder="Описание"><input id="detailExpenseAmount" inputmode="decimal" placeholder="Сумма"><button data-detail-action="quickExpense">+</button></div><div class="expense-list" style="margin-top:9px">${expenseListHtml(node)}</div></div>`;
+    <div class="detail-section expense-panel"><div class="detail-section-head"><div><small>ФИНАНСЫ РАБОЧЕГО ПРОЦЕССА</small><h3>Затраты</h3></div><div class="expense-heading-actions"><button class="expense-action-button" data-detail-action="quickExpense" aria-label="Добавить затрату">＋</button><button class="expense-action-button expense-delete-button ${state.expenseSelectionMode ? "active" : ""}" data-detail-action="toggleExpenseDelete" aria-label="Удалить выбранные затраты">${icon("trash")}</button></div></div><div class="expense-entry-row"><input id="detailExpenseTitle" placeholder="Описание"><input id="detailExpenseAmount" inputmode="decimal" placeholder="Сумма"></div><div class="expense-list">${expenseListHtml(node)}</div></div>`;
 }
 function stageSelectorHtml(stage) {
   const selected = stage.id === state.selectedProcessStageId;
@@ -1097,7 +1103,7 @@ function stageTaskHtml(node, task) {
   const timeText = task.scheduleMode === "interval" ? `${formatTaskDateTime(task.intervalStart)} — ${formatTaskDateTime(task.intervalEnd)}` : formatTaskDateTime(task.dateTime);
   return `<article class="stage-task-card ${expanded ? "expanded selected" : ""}" data-stage-task-id="${esc(task.id)}">
     <div class="stage-task-head"><label class="stage-task-check"><input type="checkbox" data-task-toggle="${esc(task.id)}" ${task.done ? "checked" : ""}><span></span></label><div class="stage-task-title"><b>${esc(task.title)}</b><small>${esc(priorityLabel(task.priority))}${task.dateTime ? ` · ${esc(formatTaskDateTime(task.dateTime))}` : ""}</small></div><div class="stage-task-actions"><button data-task-action="view" title="Открыть">${icon("open")}</button><button class="priority-orb priority-${esc(task.priority || "medium")} ${task.done ? "is-done" : ""}" data-task-action="priority" title="Изменить приоритет" aria-label="Приоритет: ${esc(priorityLabel(task.priority))}"><span></span></button></div></div>
-    ${expanded ? `<div class="stage-task-expanded">${task.note ? `<div class="task-note"><small>ЗАМЕТКА</small><p>${esc(String(task.note).slice(0,400))}</p></div>` : ""}<div class="task-contact-view"><small>НАЗНАЧЕННЫЕ КОНТАКТЫ</small>${contacts.length ? contacts.map(contact => `<article class="task-contact-card"><div class="task-contact-copy"><span class="task-contact-role">${esc(contact.role || "Контакт")}</span><b>${esc(contact.name || "Без имени")}</b>${contact.phone ? `<a class="task-contact-number" href="tel:${esc(contact.phone)}">${esc(contact.phone)}</a>` : ""}</div><div class="task-contact-messengers">${messengerBadges(contact)}</div></article>`).join("") : `<p>Контакты не назначены</p>`}</div><div class="task-time-view"><small>ВЫПОЛНЕНИЕ</small><b>${esc(timeText)}</b><span>${task.notify ? `<i class="task-bell-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 18h7"/><path d="M10 21h4"/><path d="M6.7 16.5h10.6c-.8-.9-1.3-2.1-1.3-3.6V11a4.7 4.7 0 1 0-9.4 0v1.9c0 1.5-.5 2.7-1.3 3.6Z"/></svg></i>Напомнить за ${esc(task.reminder || "15")} мин.` : "Уведомление выключено"}</span></div><div class="task-expanded-actions"><button type="button" class="task-archive-action" data-task-action="archive" aria-label="Отправить задачу в общий архив" title="Дважды нажмите, чтобы архивировать">${icon("archiveSend")}</button><button type="button" data-task-action="edit" aria-label="Редактировать задачу">${icon("edit")}</button></div></div>` : ""}
+    ${expanded ? `<div class="stage-task-expanded">${task.note ? `<div class="task-note"><small>ЗАМЕТКА</small><p>${esc(String(task.note).slice(0,400))}</p></div>` : ""}<div class="task-contact-view"><small>НАЗНАЧЕННЫЕ КОНТАКТЫ</small>${contacts.length ? contacts.map(contact => `<article class="task-contact-card"><div class="task-contact-copy"><span class="task-contact-role">${esc(contact.role || "Контакт")}</span><b>${esc(contact.name || "Без имени")}</b>${contact.phone ? `<a class="task-contact-number" href="tel:${esc(contact.phone)}">${esc(contact.phone)}</a>` : ""}</div><div class="task-contact-messengers">${messengerBadges(contact)}</div></article>`).join("") : `<p>Контакты не назначены</p>`}</div><div class="task-time-view"><small>ВЫПОЛНЕНИЕ</small><b>${esc(timeText)}</b><span>${task.notify ? `<i class="task-bell-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 18h7"/><path d="M10 21h4"/><path d="M6.7 16.5h10.6c-.8-.9-1.3-2.1-1.3-3.6V11a4.7 4.7 0 1 0-9.4 0v1.9c0 1.5-.5 2.7-1.3 3.6Z"/></svg></i>Напомнить за ${esc(task.reminder || "15")} мин.` : "Уведомление выключено"}</span></div><div class="task-expanded-actions"><div class="task-expanded-action-group"><button type="button" class="task-archive-action" data-task-action="archive" aria-label="Отправить задачу в общий архив" title="Нажмите дважды, чтобы архивировать">${icon("archiveSend")}</button><button type="button" data-task-action="edit" aria-label="Редактировать задачу">${icon("edit")}</button></div></div></div>` : ""}
   </article>`;
 }
 
@@ -1160,7 +1166,10 @@ function peopleListHtml(node) {
 function expenseListHtml(node) {
   const expenses = node.expenses || [];
   if (!expenses.length) return `<div class="note-block">Затраты ещё не добавлены.</div>`;
-  return expenses.slice().reverse().map(expense => `<div class="expense-item"><div><b>${esc(expense.title)}</b><small>${esc(expense.date || "")}</small></div><strong>${money(expense.amount)}</strong></div>`).join("");
+  return expenses.slice().reverse().map(expense => {
+    const selected = state.selectedExpenseIds.has(expense.id);
+    return `<label class="expense-item ${state.expenseSelectionMode ? "selecting" : ""} ${selected ? "selected" : ""}" data-expense-id="${esc(expense.id)}">${state.expenseSelectionMode ? `<input type="checkbox" data-expense-select="${esc(expense.id)}" ${selected ? "checked" : ""}>` : ""}<div><b>${esc(expense.title)}</b><small>${esc(expense.date || "")}</small></div><strong>${money(expense.amount)}</strong></label>`;
+  }).join("");
 }
 function personName(id) { return id ? nodeById(id)?.title : ""; }
 function tasksForPerson(personId) {
@@ -1206,6 +1215,13 @@ function handleDetailClick(event) {
   if (taskToggle) { const record=(node.tasks||[]).find(item=>item.id===taskToggle.dataset.taskToggle); if(record){record.done=taskToggle.checked;updateProcessProgress(node);saveData();renderDetailBody(node);render();} return; }
   const taskAction = event.target.closest("[data-task-action]");
   if (taskAction && node.type === "process") { handleStageTaskAction(node, taskAction); return; }
+  const expenseSelect = event.target.closest("[data-expense-select]");
+  if (expenseSelect && node.type === "process") {
+    const id=expenseSelect.dataset.expenseSelect;
+    if(expenseSelect.checked) state.selectedExpenseIds.add(id); else state.selectedExpenseIds.delete(id);
+    expenseSelect.closest('.expense-item')?.classList.toggle('selected', expenseSelect.checked);
+    return;
+  }
   const actionButton = event.target.closest("[data-detail-action]"); if (!actionButton) return;
   const action = actionButton.dataset.detailAction;
   if (action === "addAssets") { state.assetTargetNodeId = node.id; $("#assetInput").click(); }
@@ -1227,7 +1243,13 @@ function handleDetailClick(event) {
     render();
     toast("Новый этап создан");
   }
-  if (action === "quickExpense") { const title=$("#detailExpenseTitle")?.value.trim(); const amount=Number(String($("#detailExpenseAmount")?.value||"").replace(",",".")); if(!title||!amount)return toast("Введите описание и сумму"); node.expenses||=[];node.expenses.push({id:uid(),title,amount,date:todayISO()});saveData();renderDetailBody(node);render();toast("Добавлено в затраты"); }
+  if (action === "quickExpense") { const title=$("#detailExpenseTitle")?.value.trim(); const amount=Number(String($("#detailExpenseAmount")?.value||"").replace(",",".")); if(!title||!amount)return toast("Введите описание и сумму"); node.expenses||=[];node.expenses.push({id:uid(),title,amount,date:todayISO()});state.expenseSelectionMode=false;state.selectedExpenseIds.clear();saveData();renderDetailBody(node);render();toast("Добавлено в затраты"); return; }
+  if (action === "toggleExpenseDelete") {
+    if (!state.expenseSelectionMode) { state.expenseSelectionMode=true; state.selectedExpenseIds.clear(); renderDetailBody(node); toast("Выберите одну или несколько затрат"); return; }
+    if (!state.selectedExpenseIds.size) { state.expenseSelectionMode=false; renderDetailBody(node); return; }
+    if (confirm(`Удалить выбранные затраты: ${state.selectedExpenseIds.size}?`)) { node.expenses=(node.expenses||[]).filter(item=>!state.selectedExpenseIds.has(item.id)); state.selectedExpenseIds.clear(); state.expenseSelectionMode=false; saveData(); renderDetailBody(node); render(); toast("Затраты удалены"); }
+    return;
+  }
 }
 function handleStageTaskAction(node, button) {
   const action=button.dataset.taskAction; const card=button.closest("[data-stage-task-id]"); const taskId=card?.dataset.stageTaskId; const tasks=node.tasks||[]; const task=tasks.find(item=>item.id===taskId);
@@ -1612,12 +1634,13 @@ function positionProcessLockThumb(unlocked) {
 }
 function updateProcessActionLock(node) {
   const isProcess = node?.type === "process";
-  $("#detailFooter").classList.toggle("process-detail-footer", isProcess);
-  $("#processActionLock").classList.toggle("hidden", !isProcess);
-  $("#detailBranchButton").disabled = isProcess && !state.processActionsUnlocked;
-  $("#detailEditButton").disabled = isProcess && !state.processActionsUnlocked;
-  $("#processActionLock").classList.toggle("unlocked", isProcess && state.processActionsUnlocked);
-  requestAnimationFrame(() => positionProcessLockThumb(isProcess && state.processActionsUnlocked));
+  const footer=$("#detailFooter"), branch=$("#detailBranchButton"), edit=$("#detailEditButton"), lock=$("#processActionLock"), archive=$("#detailTaskArchiveButton");
+  footer.classList.toggle("process-detail-footer", isProcess);
+  archive?.classList.toggle("hidden", !isProcess);
+  edit.classList.toggle("hidden", isProcess);
+  lock.classList.add("hidden");
+  branch.disabled=false;
+  edit.disabled=false;
 }
 function bindProcessActionLock() {
   const control = $("#processActionLock");
