@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.11";
+const VERSION = "6.0.12";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -65,6 +65,7 @@ function icon(name, className = "") {
     restore: `<path d="M4 8v5h5"/><path d="M5.5 13a7 7 0 1 0 2-6"/>`,
     phone: `<path d="M7 3h3l1.2 4-2 1.6a15 15 0 0 0 6.2 6.2l1.6-2L21 14v3c0 2-1 3-3 3C10.3 20 4 13.7 4 6c0-2 1-3 3-3Z"/>`,
     mail: `<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/>`,
+    edit: `<path d="M4 20h4l11-11-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/>`,
     sun: `<circle cx="12" cy="12" r="3.5"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/>`,
     moon: `<path d="M20.5 14.2A8 8 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z"/>`
   };
@@ -204,7 +205,7 @@ function normalizeData(data) {
     const normalizedNode = { level: 2, assets: [], archived: false, status: "active", ...node };
     if (normalizedNode.type === "process") {
       normalizedNode.stages = Array.isArray(normalizedNode.stages) ? normalizedNode.stages : [];
-      normalizedNode.phonebook = Array.isArray(normalizedNode.phonebook) ? normalizedNode.phonebook : [];
+      normalizedNode.phonebook = Array.isArray(normalizedNode.phonebook) ? normalizedNode.phonebook.map(contact => ({ ...contact, messengers: Array.isArray(contact.messengers) ? contact.messengers : [] })) : [];
       const fallbackStageId = normalizedNode.stages[0]?.id || "";
       normalizedNode.tasks = Array.isArray(normalizedNode.tasks) ? normalizedNode.tasks.map(task => {
         const normalizedTask = { priority: "medium", note: "", contactIds: [], scheduleMode: "date", intervalStart: "", intervalEnd: "", dateTime: "", reminder: "15", notify: false, stageId: task.stageId || fallbackStageId, ...task };
@@ -484,12 +485,17 @@ function bindWorkspaceOnce() {
       openBudgetEditor(node);
     }
   });
+  $("#detailBody").addEventListener("dblclick", event => { const badge=event.target.closest("[data-messenger-contact][data-messenger-type]"); if(!badge)return; event.preventDefault(); event.stopPropagation(); const node=nodeById(state.activeNodeId); const contact=(node?.phonebook||[]).find(item=>item.id===badge.dataset.messengerContact); if(contact)openMessengerAction(contact,badge.dataset.messengerType); });
   $("#budgetEditValue").addEventListener("input", formatBudgetEditorInput);
   $("#phonebookClose").addEventListener("click", closePhonebook);
   $("#phonebookAdd").addEventListener("click", () => renderPhonebookEditor(null));
   $("#phonebookBody").addEventListener("click", handlePhonebookClick);
   $("#phonebookEditorForm").addEventListener("submit", savePhonebookContact);
   $("#phonebookEditorCancel").addEventListener("click", () => renderPhonebookList(nodeById(state.activeNodeId)));
+  $("#phonebookMessengers").addEventListener("click", handleMessengerPickerClick);
+  $("#messengerActionClose").addEventListener("click", closeMessengerAction);
+  $("#messengerActionWrite").addEventListener("click", () => runMessengerAction("write"));
+  $("#messengerActionCall").addEventListener("click", () => runMessengerAction("call"));
   $("#importInput").addEventListener("change", importDataFile);
   $("#assetClose").addEventListener("click", () => $("#assetViewer").close());
   $("#assetPrev").addEventListener("click", () => moveAssetViewer(-1));
@@ -1032,15 +1038,19 @@ function selectedStageTasksHtml(node) {
   return `<div class="detail-section stage-tasks-panel"><div class="detail-section-head"><div><small>ЗАДАЧИ КОНКРЕТНОГО ЭТАПА</small><h3>${esc(stage.title)}</h3></div><button class="stage-task-add" data-task-action="add" aria-label="Создать задачу">＋</button></div><div class="stage-task-list">${tasks.length ? tasks.map(task => stageTaskHtml(node,task)).join("") : `<div class="note-block">В этом этапе пока нет задач.</div>`}</div></div>`;
 }
 function priorityLabel(priority) { return priority === "high" ? "Высокий" : priority === "low" ? "Низкий" : "Средний"; }
+function formatTaskDateTime(value){if(!value)return "—";const date=new Date(value);if(Number.isNaN(date.getTime()))return String(value).replace("T"," ");return new Intl.DateTimeFormat("ru-RU",{hour:"2-digit",minute:"2-digit",day:"2-digit",month:"long",year:"numeric"}).format(date).replace(",","");}
+function messengerLabel(type){return type==="telegram"?"Telegram":type==="whatsapp"?"WhatsApp":"MAX";}
+function messengerBadges(contact){const selected=Array.isArray(contact?.messengers)?contact.messengers:[];if(!selected.length)return "";return `<span class="messenger-badges">${["telegram","whatsapp","max"].map(type=>`<button type="button" class="messenger-badge ${selected.includes(type)?"selected":"muted"}" data-messenger-contact="${esc(contact.id)}" data-messenger-type="${type}" aria-label="${messengerLabel(type)}">${type==="telegram"?"T":type==="whatsapp"?"W":"M"}</button>`).join("")}</span>`;}
 function stageTaskHtml(node, task) {
   const expanded = task.id === state.expandedProcessTaskId;
   const contacts = (task.contactIds || []).map(id => (node.phonebook || []).find(contact => contact.id === id)).filter(Boolean);
+  const timeText = task.scheduleMode === "interval" ? `${formatTaskDateTime(task.intervalStart)} — ${formatTaskDateTime(task.intervalEnd)}` : formatTaskDateTime(task.dateTime);
   return `<article class="stage-task-card ${expanded ? "expanded selected" : ""}" data-stage-task-id="${esc(task.id)}">
-    <div class="stage-task-head"><label class="stage-task-check"><input type="checkbox" data-task-toggle="${esc(task.id)}" ${task.done ? "checked" : ""}><span></span></label><div class="stage-task-title"><b>${esc(task.title)}</b><small>${esc(priorityLabel(task.priority))}${task.dateTime ? ` · ${esc(task.dateTime.replace("T"," "))}` : ""}</small></div><div class="stage-task-actions"><button data-task-action="view" title="Открыть">${icon("open")}</button><button class="priority-${esc(task.priority || "medium")}" data-task-action="priority" title="Приоритет">!</button><button data-task-action="menu" title="Действия">•••</button></div></div>
-    <div class="task-context-menu hidden"><button data-task-action="moveUp">↑ Вверх</button><button data-task-action="moveDown">↓ Вниз</button><button data-task-action="edit">Редактировать</button><button class="danger-text" data-task-action="delete">Удалить</button></div>
-    ${expanded ? `<div class="stage-task-expanded">${task.note ? `<div class="task-note"><small>ЗАМЕТКА</small><p>${esc(task.note)}</p></div>` : ""}<div class="task-contact-view"><small>НАЗНАЧЕННЫЕ КОНТАКТЫ</small>${contacts.length ? contacts.map(contact => `<div><span>${esc(contact.role || "Контакт")}</span><b>${esc(contact.name || "Без имени")}</b>${contact.phone ? `<a href="tel:${esc(contact.phone)}">${esc(contact.phone)}</a>` : ""}</div>`).join("") : `<p>Контакты не назначены</p>`}</div><div class="task-time-view"><small>ВЫПОЛНЕНИЕ</small><b>${task.scheduleMode === "interval" ? `${esc(task.intervalStart || "—")} — ${esc(task.intervalEnd || "—")}` : esc(task.dateTime?.replace("T"," ") || "Дата не выбрана")}</b><span>${task.notify ? `🔔 Напомнить за ${esc(task.reminder || "15")} мин.` : "Уведомление выключено"}</span></div></div>` : ""}
+    <div class="stage-task-head"><label class="stage-task-check"><input type="checkbox" data-task-toggle="${esc(task.id)}" ${task.done ? "checked" : ""}><span></span></label><div class="stage-task-title"><b>${esc(task.title)}</b><small>${esc(priorityLabel(task.priority))}${task.dateTime ? ` · ${esc(formatTaskDateTime(task.dateTime))}` : ""}</small></div><div class="stage-task-actions"><button data-task-action="view" title="Открыть">${icon("open")}</button><button class="priority-orb priority-${esc(task.priority || "medium")}" data-task-action="priority" title="Изменить приоритет" aria-label="Приоритет: ${esc(priorityLabel(task.priority))}"><span></span></button></div></div>
+    ${expanded ? `<div class="stage-task-expanded">${task.note ? `<div class="task-note"><small>ЗАМЕТКА</small><p>${esc(task.note)}</p></div>` : ""}<div class="task-contact-view"><small>НАЗНАЧЕННЫЕ КОНТАКТЫ</small>${contacts.length ? contacts.map(contact => `<div><span>${esc(contact.role || "Контакт")}</span><b>${esc(contact.name || "Без имени")}</b><span class="task-contact-phone">${contact.phone ? `<a href="tel:${esc(contact.phone)}">${esc(contact.phone)}</a>` : ""}${messengerBadges(contact)}</span></div>`).join("") : `<p>Контакты не назначены</p>`}</div><div class="task-time-view"><small>ВЫПОЛНЕНИЕ</small><b>${esc(timeText)}</b><span>${task.notify ? `🔔 Напомнить за ${esc(task.reminder || "15")} мин.` : "Уведомление выключено"}</span></div><div class="task-expanded-actions"><button type="button" data-task-action="edit" aria-label="Редактировать задачу">${icon("edit")}</button></div></div>` : ""}
   </article>`;
 }
+
 function personDetailHtml(node) {
   return `${heroHtml(node, node.speciality || "Специалист")}
     <div class="detail-grid"><div class="detail-stat"><small>ЗОНА ВНИМАНИЯ</small><b>${esc(node.zone || "—")}</b></div><div class="detail-stat"><small>АКТИВНЫЕ ЗАДАЧИ</small><b>${tasksForPerson(node.id).filter(task => !task.done).length}</b></div></div>
@@ -1240,10 +1250,14 @@ function saveBudgetEditor(event) {
 }
 function openPhonebook(node){renderPhonebookList(node);const d=$("#phonebookDialog");if(!d.open)d.showModal();}
 function closePhonebook(){if($("#phonebookDialog").open)$("#phonebookDialog").close();state.phonebookEditId=null;}
-function renderPhonebookList(node){state.phonebookEditId=null;const contacts=node?.phonebook||[];$("#phonebookBody").innerHTML=contacts.length?contacts.map(c=>`<article class="phonebook-card" data-phonebook-id="${esc(c.id)}"><div><b>${esc(c.name||"Без имени")}</b><small>${esc(c.role||"Контакт")}</small>${c.phone?`<a href="tel:${esc(c.phone)}">${esc(c.phone)}</a>`:""}</div><button data-phonebook-action="edit">Редактировать</button><button class="danger-text" data-phonebook-action="delete">Удалить</button></article>`).join(""):`<div class="note-block">Телефонная книга пока пуста.</div>`;$("#phonebookEditorWrap").classList.add("hidden");}
-function renderPhonebookEditor(contact){state.phonebookEditId=contact?.id||null;$("#phonebookEditorWrap").classList.remove("hidden");$("#phonebookName").value=contact?.name||"";$("#phonebookRole").value=contact?.role||"";$("#phonebookPhone").value=contact?.phone||"";$("#phonebookCar").value=contact?.carNumber||"";$("#phonebookAddress").value=contact?.address||"";$("#phonebookComment").value=contact?.comment||"";}
+function renderPhonebookList(node){state.phonebookEditId=null;const contacts=node?.phonebook||[];$("#phonebookBody").innerHTML=contacts.length?contacts.map(c=>`<article class="phonebook-card" data-phonebook-id="${esc(c.id)}"><div><b>${esc(c.name||"Без имени")}</b><small>${esc(c.role||"Контакт")}</small>${c.phone?`<a href="tel:${esc(c.phone)}">${esc(c.phone)}</a>`:""}${messengerBadges(c)}</div><button data-phonebook-action="edit">Редактировать</button><button class="danger-text" data-phonebook-action="delete">Удалить</button></article>`).join(""):`<div class="note-block">Телефонная книга пока пуста.</div>`;$("#phonebookEditorWrap").classList.add("hidden");}
+function renderPhonebookEditor(contact){state.phonebookEditId=contact?.id||null;$("#phonebookEditorWrap").classList.remove("hidden");$("#phonebookName").value=contact?.name||"";$("#phonebookRole").value=contact?.role||"";$("#phonebookPhone").value=contact?.phone||"";$("#phonebookCar").value=contact?.carNumber||"";$("#phonebookAddress").value=contact?.address||"";$("#phonebookComment").value=contact?.comment||"";const selected=Array.isArray(contact?.messengers)?contact.messengers:[];$$('[data-messenger-toggle]',$("#phonebookMessengers")).forEach(button=>{const active=selected.includes(button.dataset.messengerToggle);button.classList.toggle("selected",active);button.setAttribute("aria-pressed",String(active));});}
 function handlePhonebookClick(event){const card=event.target.closest('[data-phonebook-id]'),button=event.target.closest('[data-phonebook-action]');if(!card||!button)return;const node=nodeById(state.activeNodeId),contact=(node.phonebook||[]).find(c=>c.id===card.dataset.phonebookId);if(button.dataset.phonebookAction==='edit')renderPhonebookEditor(contact);if(button.dataset.phonebookAction==='delete'&&confirm(`Удалить контакт «${contact?.name||'Без имени'}»?`)){node.phonebook=(node.phonebook||[]).filter(c=>c.id!==contact.id);(node.tasks||[]).forEach(t=>t.contactIds=(t.contactIds||[]).filter(id=>id!==contact.id));saveData();renderPhonebookList(node);renderDetailBody(node);}}
-function savePhonebookContact(event){event.preventDefault();const node=nodeById(state.activeNodeId);if(!node)return;node.phonebook||=[];let c=node.phonebook.find(x=>x.id===state.phonebookEditId);if(!c){c={id:uid()};node.phonebook.push(c)}Object.assign(c,{name:$("#phonebookName").value.trim(),role:$("#phonebookRole").value.trim(),phone:$("#phonebookPhone").value.trim(),carNumber:$("#phonebookCar").value.trim(),address:$("#phonebookAddress").value.trim(),comment:$("#phonebookComment").value.trim()});saveData();renderPhonebookList(node);renderDetailBody(node);toast("Контакт сохранён");}
+function savePhonebookContact(event){event.preventDefault();const node=nodeById(state.activeNodeId);if(!node)return;node.phonebook||=[];let c=node.phonebook.find(x=>x.id===state.phonebookEditId);if(!c){c={id:uid()};node.phonebook.push(c)}const messengers=$$('[data-messenger-toggle].selected',$("#phonebookMessengers")).map(button=>button.dataset.messengerToggle);Object.assign(c,{name:$("#phonebookName").value.trim(),role:$("#phonebookRole").value.trim(),phone:$("#phonebookPhone").value.trim(),messengers,carNumber:$("#phonebookCar").value.trim(),address:$("#phonebookAddress").value.trim(),comment:$("#phonebookComment").value.trim()});saveData();renderPhonebookList(node);renderDetailBody(node);toast("Контакт сохранён");}
+function handleMessengerPickerClick(event){const button=event.target.closest("[data-messenger-toggle]");if(!button)return;const active=!button.classList.contains("selected");button.classList.toggle("selected",active);button.setAttribute("aria-pressed",String(active));}
+function openMessengerAction(contact,type){if(!contact?.phone)return toast("У контакта не указан номер телефона");state.messengerAction={contactId:contact.id,type,phone:contact.phone};$("#messengerActionLabel").textContent=messengerLabel(type).toUpperCase();$("#messengerActionTitle").textContent=contact.name||"Связаться";const d=$("#messengerActionDialog");if(!d.open)d.showModal();}
+function closeMessengerAction(){if($("#messengerActionDialog").open)$("#messengerActionDialog").close();state.messengerAction=null;}
+function runMessengerAction(kind){const action=state.messengerAction;if(!action)return;const digits=String(action.phone||"").replace(/\D/g,"");if(kind==="call"){location.href=`tel:${action.phone}`;closeMessengerAction();return;}let url="";if(action.type==="telegram")url=`https://t.me/+${digits}`;else if(action.type==="whatsapp")url=`https://wa.me/${digits}`;else url=`https://max.ru/u/${digits}`;window.open(url,"_blank","noopener");closeMessengerAction();}
 
 function updateProcessProgress(node) {
   if (node.type !== "process") return;
@@ -1336,8 +1350,8 @@ function removeProcessCoverFromDraft() {
   if (!state.editDraft || state.editDraft.type !== "process") return;
   state.editDraft.coverAssetId = ""; state.editDraft.coverPosition = { x: 0, y: 0, scale: 1 }; state.editDraft.coverPositions = normalizedProcessCoverPositions({}); renderEditorBody();
 }
-function openCoverQuickMenu(node){state.quickCoverNodeId=node.id;const btn=$("#coverQuickPosition");btn.disabled=!node.coverAssetId;const d=$("#coverQuickMenu");if(!d.open)d.showModal();}
-function closeCoverQuickMenu(){if($("#coverQuickMenu").open)$("#coverQuickMenu").close();}
+function openCoverQuickMenu(node){state.quickCoverNodeId=node.id;state.quickCoverReturnScrollTop=$("#detailBody")?.scrollTop||0;const btn=$("#coverQuickPosition");btn.disabled=!node.coverAssetId;const d=$("#coverQuickMenu");if(!d.open)d.showModal();}
+function closeCoverQuickMenu(){const nodeId=state.quickCoverNodeId||state.activeNodeId;if($("#coverQuickMenu").open)$("#coverQuickMenu").close();const node=nodeById(nodeId);setTimeout(()=>{const detail=$("#detailDialog");if(node&&node.type==="process"){if(!detail.open)openDetail(node);else renderDetailBody(node);requestAnimationFrame(()=>{const body=$("#detailBody");if(body)body.scrollTop=state.quickCoverReturnScrollTop||0;});}},20);}
 function prepareQuickCoverDraft(){const node=nodeById(state.quickCoverNodeId);if(!node)return null;state.editDraft=clone(node);return node;}
 function startQuickNewCover(){const node=prepareQuickCoverDraft();if(!node)return;closeCoverQuickMenu();$("#processCoverInput").click();}
 function startQuickPositionCover(){const node=prepareQuickCoverDraft();if(!node?.coverAssetId)return;closeCoverQuickMenu();openProcessCoverPositionDialog(node.coverAssetId);}
