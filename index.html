@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="BOONWAVE">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=6.0.23">
+  <link rel="stylesheet" href="styles.css?v=6.0.24">
   <title>BOONWAVE</title>
 </head>
 <body>
@@ -112,7 +112,7 @@
     <button class="menu-row" data-menu-action="fit"><span data-icon="focus"></span><div><b>Вписать всё</b><small>Вернуть все карточки в обзор</small></div></button>
     <button class="menu-row" data-menu-action="logout"><span data-icon="logout"></span><div><b>Выйти</b><small>Проекты останутся на устройстве</small></div></button>
     <button class="menu-row danger" data-menu-action="reset"><span data-icon="trash"></span><div><b>Полный сброс</b><small>Удалить локальные данные и вложения</small></div></button>
-    <footer>BOONWAVE 6.0.23 · LIGHT THEME</footer>
+    <footer>BOONWAVE 6.0.24 · LIGHT THEME</footer>
   </section>
 
   <section id="sidePanel" class="side-panel hidden">
@@ -150,7 +150,7 @@
         <div class="field"><label>Название</label><input id="taskTitle" required></div>
         <div class="field task-note-editor"><label>Заметка <span id="taskNoteCounter">0 / 400</span></label><textarea id="taskNote" maxlength="400" aria-describedby="taskNoteCounter"></textarea></div>
         <div class="field"><label>Приоритет</label><select id="taskPriority"><option value="high">Высокий</option><option value="medium">Средний</option><option value="low">Низкий</option></select></div>
-        <div class="editor-group"><div class="detail-section-head"><h3>Назначить контакты</h3></div><div id="taskContactPicker" class="task-contact-picker"></div></div>
+        <div class="editor-group"><div class="detail-section-head"><h3>Назначить роль</h3></div><div id="taskContactPicker" class="task-contact-picker task-role-picker"></div></div>
         <div class="editor-group"><h3>Время выполнения</h3><div class="field"><label>Режим</label><select id="taskScheduleMode"><option value="interval">Интервал выполнения</option><option value="date">Конкретная дата и время</option></select></div><div id="taskIntervalFields" class="field-grid"><div class="field"><label>Начало</label><input id="taskIntervalStart" type="datetime-local"></div><div class="field"><label>Окончание</label><input id="taskIntervalEnd" type="datetime-local"></div></div><div id="taskDateField" class="field"><label>Дата и время</label><input id="taskDateTime" type="datetime-local"></div><div class="task-reminder-row"><div class="field"><label>За сколько напомнить</label><select id="taskReminder"><option value="0">В момент начала</option><option value="15">За 15 минут</option><option value="60">За 1 час</option><option value="1440">За 1 день</option></select></div><label class="task-bell-toggle" title="Уведомление"><input id="taskNotify" type="checkbox"><span>🔔</span></label></div></div>
         
       </div>
@@ -158,6 +158,7 @@
     </form>
   </dialog>
 
+  <dialog id="taskRoleDialog" class="mini-editor-dialog task-role-dialog"><form><header><div><small>ЗАДАЧА ЭТАПА</small><h3>Назначить роль</h3></div><button type="button" id="taskRoleDialogClose">×</button></header><div id="taskRoleDialogList" class="task-role-dialog-list"></div><div class="confirm-actions"><button type="button" class="ghost" id="taskRoleDialogCancel">Отмена</button><button type="button" class="primary" id="taskRoleDialogApply">Применить</button></div></form></dialog>
 
   <dialog id="stageEditorDialog" class="mini-editor-dialog"><form id="stageEditorForm"><header><h3>Редактировать этап</h3><button type="button" id="stageEditorClose">×</button></header><div class="field"><label>Название</label><input id="stageEditTitle" required></div><div class="field"><label>Календарь</label><input id="stageEditDate" type="date"></div><div class="stage-editor-actions"><button type="button" class="danger-text stage-delete-button" id="stageDeleteButton">Удалить этап</button><button class="primary" type="submit">Сохранить</button></div></form></dialog>
   <dialog id="stageDeleteDialog" class="mini-editor-dialog confirm-dialog"><form><header><h3>Удалить этап?</h3><button type="button" id="stageDeleteClose">×</button></header><p>При удалении этапа будут удалены все связанные с ним задачи. Вы уверены?</p><div class="confirm-actions"><button type="button" class="ghost" id="stageDeleteNo">Нет</button><button type="button" class="primary" id="stageDeleteYes">Да</button></div></form></dialog>
@@ -188,6 +189,6 @@
   <input id="importInput" type="file" accept="application/json,.json" hidden>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=6.0.23"></script>
+  <script src="app.js?v=6.0.24"></script>
 </body>
 </html>

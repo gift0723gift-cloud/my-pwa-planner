@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.23";
+const VERSION = "6.0.24";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -470,6 +470,9 @@ function bindWorkspaceOnce() {
   $("#taskNote").addEventListener("input", updateTaskNoteCounter);
   $("#taskEditorClose").addEventListener("click", closeTaskEditor);
   $("#taskEditorCancel").addEventListener("click", closeTaskEditor);
+  $("#taskRoleDialogClose")?.addEventListener("click", closeTaskRoleDialog);
+  $("#taskRoleDialogCancel")?.addEventListener("click", closeTaskRoleDialog);
+  $("#taskRoleDialogApply")?.addEventListener("click", applyTaskRoleDialog);
   $("#taskScheduleMode").addEventListener("change", updateTaskScheduleFields);
   $("#stageEditorForm").addEventListener("submit", saveStageEditor);
   $("#stageEditorClose").addEventListener("click", closeStageEditor);
@@ -1031,7 +1034,7 @@ function processCoverStyle(position) {
   const y = clamp(Number(position?.y || 0), -50, 50);
   const objectX = clamp(50 + x, 0, 100);
   const objectY = clamp(50 + y, 0, 100);
-  return `object-fit:cover;object-position:${objectX}% ${objectY}%;transform:scale(${scale})`;
+  return `object-fit:cover !important;object-position:${objectX}% ${objectY}% !important;transform:scale(${scale});transform-origin:center center`;
 }
 function processCoverMediaHtml(node) {
   if (!node.coverAssetId) return "";
@@ -1084,7 +1087,7 @@ function stageTaskHtml(node, task) {
   const timeText = task.scheduleMode === "interval" ? `${formatTaskDateTime(task.intervalStart)} — ${formatTaskDateTime(task.intervalEnd)}` : formatTaskDateTime(task.dateTime);
   return `<article class="stage-task-card ${expanded ? "expanded selected" : ""}" data-stage-task-id="${esc(task.id)}">
     <div class="stage-task-head"><label class="stage-task-check"><input type="checkbox" data-task-toggle="${esc(task.id)}" ${task.done ? "checked" : ""}><span></span></label><div class="stage-task-title"><b>${esc(task.title)}</b><small>${esc(priorityLabel(task.priority))}${task.dateTime ? ` · ${esc(formatTaskDateTime(task.dateTime))}` : ""}</small></div><div class="stage-task-actions"><button data-task-action="view" title="Открыть">${icon("open")}</button><button class="priority-orb priority-${esc(task.priority || "medium")} ${task.done ? "is-done" : ""}" data-task-action="priority" title="Изменить приоритет" aria-label="Приоритет: ${esc(priorityLabel(task.priority))}"><span></span></button></div></div>
-    ${expanded ? `<div class="stage-task-expanded">${task.note ? `<div class="task-note"><small>ЗАМЕТКА</small><p>${esc(String(task.note).slice(0,400))}</p></div>` : ""}<div class="task-contact-view"><small>НАЗНАЧЕННЫЕ КОНТАКТЫ</small>${contacts.length ? contacts.map(contact => `<article class="task-contact-card"><div class="task-contact-copy"><span class="task-contact-role">${esc(contact.role || "Контакт")}</span><b>${esc(contact.name || "Без имени")}</b>${contact.phone ? `<a class="task-contact-number" href="tel:${esc(contact.phone)}">${esc(contact.phone)}</a>` : ""}</div><div class="task-contact-messengers">${messengerBadges(contact)}</div></article>`).join("") : `<p>Контакты не назначены</p>`}</div><div class="task-time-view"><small>ВЫПОЛНЕНИЕ</small><b>${esc(timeText)}</b><span>${task.notify ? `🔔 Напомнить за ${esc(task.reminder || "15")} мин.` : "Уведомление выключено"}</span></div><div class="task-expanded-actions"><button type="button" data-task-action="edit" aria-label="Редактировать задачу">${icon("edit")}</button></div></div>` : ""}
+    ${expanded ? `<div class="stage-task-expanded">${task.note ? `<div class="task-note"><small>ЗАМЕТКА</small><p>${esc(String(task.note).slice(0,400))}</p></div>` : ""}<div class="task-contact-view"><small>НАЗНАЧЕННЫЕ КОНТАКТЫ</small>${contacts.length ? contacts.map(contact => `<article class="task-contact-card"><div class="task-contact-copy"><span class="task-contact-role">${esc(contact.role || "Контакт")}</span><b>${esc(contact.name || "Без имени")}</b>${contact.phone ? `<a class="task-contact-number" href="tel:${esc(contact.phone)}">${esc(contact.phone)}</a>` : ""}</div><div class="task-contact-messengers">${messengerBadges(contact)}</div></article>`).join("") : `<p>Контакты не назначены</p>`}</div><div class="task-time-view"><small>ВЫПОЛНЕНИЕ</small><b>${esc(timeText)}</b><span>${task.notify ? `<i class="task-bell-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 18h7"/><path d="M10 21h4"/><path d="M6.7 16.5h10.6c-.8-.9-1.3-2.1-1.3-3.6V11a4.7 4.7 0 1 0-9.4 0v1.9c0 1.5-.5 2.7-1.3 3.6Z"/></svg></i>Напомнить за ${esc(task.reminder || "15")} мин.` : "Уведомление выключено"}</span></div><div class="task-expanded-actions"><button type="button" data-task-action="edit" aria-label="Редактировать задачу">${icon("edit")}</button></div></div>` : ""}
   </article>`;
 }
 
@@ -1234,12 +1237,30 @@ function openTaskEditor(node, task) {
   $("#taskTitle").value=base.title||""; $("#taskNote").value=String(base.note||"").slice(0,400); updateTaskNoteCounter(); $("#taskPriority").value=base.priority||"medium"; $("#taskScheduleMode").value=base.scheduleMode||"date"; $("#taskIntervalStart").value=base.intervalStart||""; $("#taskIntervalEnd").value=base.intervalEnd||""; $("#taskDateTime").value=base.dateTime||""; $("#taskReminder").value=base.reminder||"15"; $("#taskNotify").checked=Boolean(base.notify);
   renderTaskContactPicker(node, base.contactIds||[]); updateTaskScheduleFields(); const dialog=$("#taskEditorDialog"); if(!dialog.open)dialog.showModal();
 }
-function closeTaskEditor(){if($("#taskEditorDialog").open)$("#taskEditorDialog").close();state.taskDraft=null;}
+function closeTaskEditor(){if($("#taskEditorDialog").open)$("#taskEditorDialog").close();closeTaskRoleDialog();state.taskDraft=null;}
 function renderTaskContactPicker(node, selectedIds){
   const contacts=node.phonebook||[];
-  $("#taskContactPicker").innerHTML=contacts.length?contacts.map(c=>`<label class="task-contact-choice"><input type="checkbox" value="${esc(c.id)}" ${selectedIds.includes(c.id)?"checked":""}><span><b>${esc(c.name||"Без имени")}</b><small>${esc(c.role||"Контакт")}${c.phone?` · ${esc(c.phone)}`:""}</small></span></label>`).join(""):`<div class="note-block">Сначала добавьте контакт в телефонную книгу рабочего процесса.</div>`;
+  const selected=selectedIds.map(id=>contacts.find(c=>c.id===id)).filter(Boolean);
+  const summary=selected.length?selected.map(contact=>`<article class="task-role-card"><div class="task-role-card-copy"><small>${esc(contact.role||"Роль")}</small><b>${esc(contact.name||"Без имени")}</b>${contact.phone?`<span>${esc(contact.phone)}</span>`:""}</div></article>`).join(""):`<div class="note-block">Роли пока не назначены.</div>`;
+  $("#taskContactPicker").innerHTML=`<div class="task-role-toolbar"><button type="button" class="ghost task-role-icon-button" id="taskRoleAdd" aria-label="Добавить роль">${icon("plus")}</button><button type="button" class="ghost task-role-icon-button" id="taskRoleRemove" aria-label="Удалить роль" ${selected.length?"":"disabled"}>${icon("trash")}</button></div><div class="task-role-summary">${summary}</div>`;
+  $("#taskRoleAdd")?.addEventListener("click",()=>openTaskRoleDialog(node));
+  $("#taskRoleRemove")?.addEventListener("click",()=>{if(!state.taskDraft)return;state.taskDraft.contactIds=[];renderTaskContactPicker(node,[]);});
 }
-function readTaskContactIds(){return $$('#taskContactPicker input:checked').map(input=>input.value);}
+function readTaskContactIds(){return [...new Set((state.taskDraft?.contactIds||[]).map(String))];}
+function openTaskRoleDialog(node){
+  const dialog=$("#taskRoleDialog");
+  const contacts=node?.phonebook||[];
+  $("#taskRoleDialogList").innerHTML=contacts.length?contacts.map(c=>`<label class="task-contact-choice"><input type="checkbox" value="${esc(c.id)}" ${(state.taskDraft?.contactIds||[]).includes(c.id)?"checked":""}><span><b>${esc(c.role||"Роль")}</b><small>${esc(c.name||"Без имени")}${c.phone?` · ${esc(c.phone)}`:""}</small></span></label>`).join(""):`<div class="note-block">Сначала добавьте контакт в телефонную книгу рабочего процесса.</div>`;
+  if(!dialog.open) dialog.showModal();
+}
+function closeTaskRoleDialog(){const dialog=$("#taskRoleDialog"); if(dialog?.open) dialog.close();}
+function applyTaskRoleDialog(){
+  if(!state.taskDraft) return closeTaskRoleDialog();
+  state.taskDraft.contactIds=$$('#taskRoleDialogList input:checked').map(input=>input.value);
+  const node=nodeById(state.activeNodeId);
+  if(node?.type==='process') renderTaskContactPicker(node,state.taskDraft.contactIds);
+  closeTaskRoleDialog();
+}
 function updateTaskScheduleFields(){const interval=$("#taskScheduleMode").value==="interval";$("#taskIntervalFields").classList.toggle("hidden",!interval);$("#taskDateField").classList.toggle("hidden",interval);}
 function updateTaskNoteCounter(){const input=$("#taskNote"),counter=$("#taskNoteCounter");if(!input||!counter)return;if(input.value.length>400)input.value=input.value.slice(0,400);counter.textContent=`${input.value.length} / 400`;}
 function saveTaskEditor(event){event.preventDefault();const node=nodeById(state.activeNodeId);if(!node||node.type!=="process"||!state.taskDraft)return;const d=state.taskDraft;d.title=$("#taskTitle").value.trim()||"Новая задача";d.note=$("#taskNote").value.slice(0,400).trim();d.priority=$("#taskPriority").value;d.contactIds=readTaskContactIds();d.scheduleMode=$("#taskScheduleMode").value;d.intervalStart=$("#taskIntervalStart").value;d.intervalEnd=$("#taskIntervalEnd").value;d.dateTime=$("#taskDateTime").value;d.reminder=$("#taskReminder").value;d.notify=$("#taskNotify").checked;d.stageId=d.stageId||state.selectedProcessStageId;node.tasks||=[];const idx=node.tasks.findIndex(t=>t.id===d.id);if(idx>=0)node.tasks[idx]=d;else node.tasks.push(d);state.expandedProcessTaskId=d.id;updateProcessProgress(node);saveData();closeTaskEditor();renderDetailBody(node);render();toast("Задача сохранена");}
