@@ -332,3 +332,23 @@ html[data-theme="light"] .process-cover-menu-button{background:#ffffffcc;color:#
   }
   .process-metric,.process-phonebook-button{padding:4px 2px!important}
 }
+
+
+/* v6.0.11 — roles alignment and stable stage editor return */
+.process-phonebook-button small{
+  position:static!important;
+  inset:auto!important;
+  right:auto!important;
+  top:auto!important;
+  margin:0!important;
+}
+.process-phonebook-button b{
+  position:static!important;
+  margin-top:4px!important;
+}
+.process-phonebook-button{
+  gap:0!important;
+  cursor:pointer;
+  touch-action:manipulation!important;
+}
+.process-phonebook-button:active{transform:scale(.98)}

@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.10";
+const VERSION = "6.0.11";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -102,6 +102,8 @@ const state = {
   phonebookEditId: null,
   detailScrollTop: 0,
   lastBudgetTap: 0,
+  lastPhonebookTap: 0,
+  stageReturnScrollTop: 0,
   isReloadingForWorker: false
 };
 
@@ -462,6 +464,7 @@ function bindWorkspaceOnce() {
   $("#taskScheduleMode").addEventListener("change", updateTaskScheduleFields);
   $("#stageEditorForm").addEventListener("submit", saveStageEditor);
   $("#stageEditorClose").addEventListener("click", closeStageEditor);
+  $("#stageEditorDialog").addEventListener("cancel", event => { event.preventDefault(); closeStageEditor(); });
   $("#stageDeleteButton").addEventListener("click", openStageDeleteConfirm);
   $("#stageDeleteClose").addEventListener("click", closeStageDeleteConfirm);
   $("#stageDeleteNo").addEventListener("click", cancelStageDelete);
@@ -1120,6 +1123,19 @@ function handleDetailClick(event) {
     }
     return;
   }
+  const phonebookButton = event.target.closest('[data-detail-action="phonebook"]');
+  if (phonebookButton && node.type === "process") {
+    event.preventDefault();
+    event.stopPropagation();
+    const now = performance.now();
+    if (state.lastPhonebookTap && now - state.lastPhonebookTap < 620) {
+      state.lastPhonebookTap = 0;
+      openPhonebook(node);
+    } else {
+      state.lastPhonebookTap = now;
+    }
+    return;
+  }
   const stageButton = event.target.closest("[data-stage-select]");
   if (stageButton && node.type === "process") {
     const stageId = stageButton.dataset.stageSelect; const now = performance.now();
@@ -1136,7 +1152,7 @@ function handleDetailClick(event) {
   if (action === "openProcess") { const existing=state.data.nodes.find(item=>item.type==="process"&&item.projectId===node.id&&!item.archived); if(existing){state.selectedId=existing.id;render();focusNode(existing);openDetail(existing);}else createProcessForProject(node); }
   if (action === "editNode") openEditor(node);
   if (action === "editBudget") openBudgetEditor(node);
-  if (action === "phonebook") openPhonebook(node);
+  if (action === "phonebook") return;
   if (action === "coverMenu" && node.type === "process") openCoverQuickMenu(node);
   if (action === "addStage" && node.type === "process") {
     node.stages ||= [];
@@ -1180,9 +1196,10 @@ function readTaskContactIds(){return $$('#taskContactPicker input:checked').map(
 function updateTaskScheduleFields(){const interval=$("#taskScheduleMode").value==="interval";$("#taskIntervalFields").classList.toggle("hidden",!interval);$("#taskDateField").classList.toggle("hidden",interval);}
 function saveTaskEditor(event){event.preventDefault();const node=nodeById(state.activeNodeId);if(!node||node.type!=="process"||!state.taskDraft)return;const d=state.taskDraft;d.title=$("#taskTitle").value.trim()||"Новая задача";d.note=$("#taskNote").value.trim();d.priority=$("#taskPriority").value;d.contactIds=readTaskContactIds();d.scheduleMode=$("#taskScheduleMode").value;d.intervalStart=$("#taskIntervalStart").value;d.intervalEnd=$("#taskIntervalEnd").value;d.dateTime=$("#taskDateTime").value;d.reminder=$("#taskReminder").value;d.notify=$("#taskNotify").checked;d.stageId=d.stageId||state.selectedProcessStageId;node.tasks||=[];const idx=node.tasks.findIndex(t=>t.id===d.id);if(idx>=0)node.tasks[idx]=d;else node.tasks.push(d);state.expandedProcessTaskId=d.id;updateProcessProgress(node);saveData();closeTaskEditor();renderDetailBody(node);render();toast("Задача сохранена");}
 
-function openStageEditor(node, stageId){const stage=(node.stages||[]).find(item=>item.id===stageId);if(!stage)return;state.stageEditDraft={nodeId:node.id,stageId};$("#stageEditTitle").value=stage.title||"";$("#stageEditDate").value=stage.deadline||"";const d=$("#stageEditorDialog");if(!d.open)d.showModal();}
-function closeStageEditor(){if($("#stageEditorDialog").open)$("#stageEditorDialog").close();state.stageEditDraft=null;}
-function saveStageEditor(event){event.preventDefault();const draft=state.stageEditDraft,node=nodeById(draft?.nodeId),stage=(node?.stages||[]).find(item=>item.id===draft?.stageId);if(!stage)return;stage.title=$("#stageEditTitle").value.trim()||"Новый этап";stage.deadline=$("#stageEditDate").value;saveData();closeStageEditor();renderDetailBody(node);render();toast("Этап сохранён");}
+function openStageEditor(node, stageId){const stage=(node.stages||[]).find(item=>item.id===stageId);if(!stage)return;state.stageEditDraft={nodeId:node.id,stageId};state.stageReturnScrollTop=$("#detailBody")?.scrollTop||0;$("#stageEditTitle").value=stage.title||"";$("#stageEditDate").value=stage.deadline||"";const d=$("#stageEditorDialog");if(!d.open)d.showModal();}
+function restoreProcessDetailAfterStageEditor(nodeId){const node=nodeById(nodeId||state.activeNodeId);if(!node||node.type!=="process")return;setTimeout(()=>{const detail=$("#detailDialog");if(!detail.open){openDetail(node);}else{renderDetailBody(node);}requestAnimationFrame(()=>{const body=$("#detailBody");if(body)body.scrollTop=state.stageReturnScrollTop||0;});},30);}
+function closeStageEditor(){const nodeId=state.stageEditDraft?.nodeId||state.activeNodeId;if($("#stageEditorDialog").open)$("#stageEditorDialog").close();state.stageEditDraft=null;restoreProcessDetailAfterStageEditor(nodeId);}
+function saveStageEditor(event){event.preventDefault();event.stopPropagation();const draft=state.stageEditDraft,node=nodeById(draft?.nodeId),stage=(node?.stages||[]).find(item=>item.id===draft?.stageId);if(!stage)return;stage.title=$("#stageEditTitle").value.trim()||"Новый этап";stage.deadline=$("#stageEditDate").value;saveData();closeStageEditor();renderCards();renderLinks();toast("Этап сохранён");}
 function openStageDeleteConfirm(){const d=$("#stageDeleteDialog");if(!d.open)d.showModal();}
 function closeStageDeleteConfirm(){if($("#stageDeleteDialog").open)$("#stageDeleteDialog").close();}
 function cancelStageDelete(){closeStageDeleteConfirm();closeStageEditor();const node=nodeById(state.activeNodeId);if(node)renderDetailBody(node);}
