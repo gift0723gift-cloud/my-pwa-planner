@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="BOONWAVE">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=6.0.2">
+  <link rel="stylesheet" href="styles.css?v=6.0.3">
   <title>BOONWAVE</title>
 </head>
 <body>
@@ -145,7 +145,12 @@
   <dialog id="processCoverDialog" class="cover-position-dialog">
     <form method="dialog" class="cover-position-shell">
       <header><div><small>ОБЛОЖКА РАБОЧЕГО ПРОЦЕССА</small><h2>Позиционирование</h2></div><button value="cancel" aria-label="Закрыть">×</button></header>
-      <div id="processCoverFrame" class="cover-position-frame"><img id="processCoverPreview" alt=""></div>
+      <div class="cover-size-switch" role="tablist" aria-label="Размер блока">
+        <button type="button" data-cover-mode="1" aria-label="Компактный блок"><span class="cover-size-icon compact-icon"></span><small>Компактный</small></button>
+        <button type="button" data-cover-mode="2" class="active" aria-label="Рабочий блок"><span class="cover-size-icon medium-icon"></span><small>Рабочий</small></button>
+        <button type="button" data-cover-mode="3" aria-label="Развёрнутый блок"><span class="cover-size-icon expanded-icon"></span><small>Развёрнутый</small></button>
+      </div>
+      <div id="processCoverFrame" class="cover-position-frame mode-2"><img id="processCoverPreview" alt=""></div>
       <div class="cover-position-controls"><label>Масштаб<input id="processCoverScale" type="range" min="1" max="2.5" step="0.01" value="1"></label><button type="button" class="ghost" id="processCoverReset">Сбросить</button><button type="button" class="primary" id="processCoverApply">Применить</button></div>
     </form>
   </dialog>
@@ -154,6 +159,6 @@
   <input id="importInput" type="file" accept="application/json,.json" hidden>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=6.0.2"></script>
+  <script src="app.js?v=6.0.3"></script>
 </body>
 </html>

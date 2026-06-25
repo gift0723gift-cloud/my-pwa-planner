@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.2";
+const VERSION = "6.0.3";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -93,6 +93,7 @@ const state = {
   editDraft: null,
   processActionsUnlocked: false,
   coverPositionDraft: null,
+  coverPositionMode: "2",
   isReloadingForWorker: false
 };
 
@@ -497,7 +498,7 @@ function renderCards() {
     article.dataset.type = node.type;
     article.style.left = `${node.x}px`;
     article.style.top = `${node.y}px`;
-    const cover = node.coverAssetId ? `data-cover-id="${esc(node.coverAssetId)}"` : "";
+    const cover = node.coverAssetId ? `data-cover-id="${esc(node.coverAssetId)}" data-cover-node="${esc(node.id)}"` : "";
     const progress = Number(node.progress || (node.type === "project" ? 0 : 0));
     article.innerHTML = `
       <div class="card-shell">
@@ -530,6 +531,12 @@ async function hydrateCardCovers() {
     const url = await assetUrl(id).catch(() => null);
     if (url && visual.isConnected) {
       visual.style.backgroundImage = `url("${url}")`;
+      const node = nodeById(visual.dataset.coverNode);
+      if (node?.type === "process") {
+        const position = processCoverPosition(node, String(node.level || 2));
+        visual.style.backgroundPosition = `calc(50% + ${Number(position.x || 0)}%) calc(50% + ${Number(position.y || 0)}%)`;
+        visual.style.backgroundSize = `${Math.max(100, Number(position.scale || 1) * 100)}%`;
+      }
       visual.querySelector(".card-visual-placeholder")?.remove();
     }
   }
@@ -909,9 +916,21 @@ function projectDetailHtml(node) {
       <div class="note-block">${process ? `${(process.stages || []).length} этапов · ${(process.tasks || []).filter(task => !task.done).length} открытых задач · ${(process.peopleIds || []).length} человек` : "Этапы, задачи, связанные люди и затраты вынесены в отдельную карточку."}</div>
     </div>`;
 }
+function normalizedProcessCoverPositions(source) {
+  const legacy = source?.coverPosition || { x: 0, y: 0, scale: 1 };
+  const positions = source?.coverPositions || {};
+  return {
+    "1": { ...legacy, ...(positions["1"] || {}) },
+    "2": { ...legacy, ...(positions["2"] || {}) },
+    "3": { ...legacy, ...(positions["3"] || {}) }
+  };
+}
+function processCoverPosition(node, mode = "2") {
+  return normalizedProcessCoverPositions(node)[String(mode)] || { x: 0, y: 0, scale: 1 };
+}
 function processCoverMediaHtml(node) {
   if (!node.coverAssetId) return "";
-  const position = node.coverPosition || { x: 0, y: 0, scale: 1 };
+  const position = processCoverPosition(node, "2");
   return `<img class="process-cover-media" data-process-cover="${esc(node.coverAssetId)}" style="transform:translate(${Number(position.x || 0)}%,${Number(position.y || 0)}%) scale(${Number(position.scale || 1)})" alt="">`;
 }
 function processDetailHtml(node) {
@@ -1039,7 +1058,7 @@ function commonFields(draft) {
 }
 function processCoverEditorHtml(draft) {
   const hasCover = Boolean(draft.coverAssetId);
-  const position = draft.coverPosition || { x: 0, y: 0, scale: 1 };
+  const position = processCoverPosition(draft, "2");
   return `<div class="field process-cover-field"><label>Обложка</label><div class="process-cover-editor">${hasCover ? `<div class="process-cover-thumb"><img data-editor-process-cover="${esc(draft.coverAssetId)}" style="transform:translate(${Number(position.x || 0)}%,${Number(position.y || 0)}%) scale(${Number(position.scale || 1)})" alt=""></div>` : `<div class="process-cover-empty">Обложка не добавлена</div>`}<div class="process-cover-buttons"><button type="button" class="ghost" data-editor-action="addProcessCover">${hasCover ? "Изменить обложку" : "Добавить обложку"}</button>${hasCover ? `<button type="button" class="danger-text process-cover-remove" data-editor-action="removeProcessCover">Удалить обложку</button>` : ""}</div></div></div>`;
 }
 function statusOptions(value) {
@@ -1104,30 +1123,66 @@ async function hydrateProcessCoverEditor() {
 }
 function removeProcessCoverFromDraft() {
   if (!state.editDraft || state.editDraft.type !== "process") return;
-  state.editDraft.coverAssetId = ""; state.editDraft.coverPosition = { x: 0, y: 0, scale: 1 }; renderEditorBody();
+  state.editDraft.coverAssetId = ""; state.editDraft.coverPosition = { x: 0, y: 0, scale: 1 }; state.editDraft.coverPositions = normalizedProcessCoverPositions({}); renderEditorBody();
 }
 async function handleProcessCoverFile(event) {
   const file = event.target.files?.[0]; event.target.value = "";
   if (!file || !state.editDraft || state.editDraft.type !== "process") return;
   const id = uid(); const metadata = { id, name: file.name, type: file.type || "image/jpeg", size: file.size, createdAt: Date.now() };
-  await putAsset({ ...metadata, blob: file }); state.editDraft.assets ||= []; state.editDraft.assets.push(metadata); state.editDraft.coverAssetId = id; state.editDraft.coverPosition = { x: 0, y: 0, scale: 1 }; openProcessCoverPositionDialog(id);
+  await putAsset({ ...metadata, blob: file }); state.editDraft.assets ||= []; state.editDraft.assets.push(metadata); state.editDraft.coverAssetId = id; state.editDraft.coverPosition = { x: 0, y: 0, scale: 1 }; state.editDraft.coverPositions = normalizedProcessCoverPositions({}); openProcessCoverPositionDialog(id);
 }
 async function openProcessCoverPositionDialog(assetId) {
   const url = await assetUrl(assetId).catch(() => null); if (!url) return;
-  state.coverPositionDraft = { ...(state.editDraft?.coverPosition || { x: 0, y: 0, scale: 1 }) };
-  $("#processCoverPreview").src = url; $("#processCoverScale").value = state.coverPositionDraft.scale || 1; updateProcessCoverPreview();
+  state.coverPositionDraft = normalizedProcessCoverPositions(state.editDraft || {});
+  state.coverPositionMode = "2";
+  $("#processCoverPreview").src = url;
+  setProcessCoverMode("2");
   const dialog = $("#processCoverDialog"); if (!dialog.open) dialog.showModal();
 }
-function updateProcessCoverPreview() {
-  if (!state.coverPositionDraft) return; state.coverPositionDraft.scale = Number($("#processCoverScale").value || 1);
-  $("#processCoverPreview").style.transform = `translate(${state.coverPositionDraft.x || 0}%,${state.coverPositionDraft.y || 0}%) scale(${state.coverPositionDraft.scale})`;
+function currentProcessCoverPosition() {
+  if (!state.coverPositionDraft) return null;
+  return state.coverPositionDraft[state.coverPositionMode] || (state.coverPositionDraft[state.coverPositionMode] = { x: 0, y: 0, scale: 1 });
 }
-function resetProcessCoverPosition() { state.coverPositionDraft = { x: 0, y: 0, scale: 1 }; $("#processCoverScale").value = 1; updateProcessCoverPreview(); }
-function applyProcessCoverPosition() { if (!state.editDraft || !state.coverPositionDraft) return; state.editDraft.coverPosition = { ...state.coverPositionDraft }; $("#processCoverDialog").close(); renderEditorBody(); }
+function setProcessCoverMode(mode) {
+  if (!state.coverPositionDraft) return;
+  state.coverPositionMode = String(mode);
+  $$("[data-cover-mode]", $("#processCoverDialog")).forEach(button => button.classList.toggle("active", button.dataset.coverMode === state.coverPositionMode));
+  const frame = $("#processCoverFrame"); frame.className = `cover-position-frame mode-${state.coverPositionMode}`;
+  const position = currentProcessCoverPosition();
+  $("#processCoverScale").value = position.scale || 1;
+  updateProcessCoverPreview();
+}
+function updateProcessCoverPreview() {
+  const position = currentProcessCoverPosition(); if (!position) return;
+  position.scale = Number($("#processCoverScale").value || 1);
+  $("#processCoverPreview").style.transform = `translate(${position.x || 0}%,${position.y || 0}%) scale(${position.scale})`;
+}
+function resetProcessCoverPosition() {
+  if (!state.coverPositionDraft) return;
+  state.coverPositionDraft[state.coverPositionMode] = { x: 0, y: 0, scale: 1 };
+  $("#processCoverScale").value = 1; updateProcessCoverPreview();
+}
+function applyProcessCoverPosition() {
+  if (!state.editDraft || !state.coverPositionDraft) return;
+  state.editDraft.coverPositions = clone(state.coverPositionDraft);
+  state.editDraft.coverPosition = { ...state.coverPositionDraft["2"] };
+  $("#processCoverDialog").close(); renderEditorBody();
+}
 function bindProcessCoverPositioning() {
   const frame = $("#processCoverFrame"); let drag = null;
-  frame.addEventListener("pointerdown", event => { if (!state.coverPositionDraft) return; drag = { x:event.clientX, y:event.clientY, ox:state.coverPositionDraft.x || 0, oy:state.coverPositionDraft.y || 0 }; frame.setPointerCapture?.(event.pointerId); });
-  frame.addEventListener("pointermove", event => { if (!drag || !state.coverPositionDraft) return; const rect=frame.getBoundingClientRect(); state.coverPositionDraft.x=clamp(drag.ox+(event.clientX-drag.x)/rect.width*100,-50,50); state.coverPositionDraft.y=clamp(drag.oy+(event.clientY-drag.y)/rect.height*100,-50,50); updateProcessCoverPreview(); });
+  $$("[data-cover-mode]", $("#processCoverDialog")).forEach(button => button.addEventListener("click", () => setProcessCoverMode(button.dataset.coverMode)));
+  frame.addEventListener("pointerdown", event => {
+    const position = currentProcessCoverPosition(); if (!position) return;
+    drag = { x:event.clientX, y:event.clientY, ox:position.x || 0, oy:position.y || 0 };
+    frame.setPointerCapture?.(event.pointerId);
+  });
+  frame.addEventListener("pointermove", event => {
+    const position = currentProcessCoverPosition(); if (!drag || !position) return;
+    const rect=frame.getBoundingClientRect();
+    position.x=clamp(drag.ox+(event.clientX-drag.x)/rect.width*100,-50,50);
+    position.y=clamp(drag.oy+(event.clientY-drag.y)/rect.height*100,-50,50);
+    updateProcessCoverPreview();
+  });
   const end=()=>{drag=null}; frame.addEventListener("pointerup",end); frame.addEventListener("pointercancel",end);
 }
 function updateProcessActionLock(node) {
