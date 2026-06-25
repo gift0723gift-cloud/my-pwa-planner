@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.5";
+const VERSION = "6.0.6";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -97,6 +97,9 @@ const state = {
   selectedProcessStageId: null,
   expandedProcessTaskId: null,
   taskDraft: null,
+  stageEditDraft: null,
+  phonebookEditId: null,
+  detailScrollTop: 0,
   isReloadingForWorker: false
 };
 
@@ -197,11 +200,21 @@ function normalizeData(data) {
     const normalizedNode = { level: 2, assets: [], archived: false, status: "active", ...node };
     if (normalizedNode.type === "process") {
       normalizedNode.stages = Array.isArray(normalizedNode.stages) ? normalizedNode.stages : [];
+      normalizedNode.phonebook = Array.isArray(normalizedNode.phonebook) ? normalizedNode.phonebook : [];
       const fallbackStageId = normalizedNode.stages[0]?.id || "";
-      normalizedNode.tasks = Array.isArray(normalizedNode.tasks) ? normalizedNode.tasks.map(task => ({
-        priority: "medium", note: "", contacts: [], scheduleMode: "date", intervalStart: "", intervalEnd: "", dateTime: "", reminder: "15", notify: false,
-        carNumber: "", address: "", extraComment: "", stageId: task.stageId || fallbackStageId, ...task
-      })) : [];
+      normalizedNode.tasks = Array.isArray(normalizedNode.tasks) ? normalizedNode.tasks.map(task => {
+        const normalizedTask = { priority: "medium", note: "", contactIds: [], scheduleMode: "date", intervalStart: "", intervalEnd: "", dateTime: "", reminder: "15", notify: false, stageId: task.stageId || fallbackStageId, ...task };
+        if ((!normalizedTask.contactIds || !normalizedTask.contactIds.length) && Array.isArray(task.contacts)) {
+          normalizedTask.contactIds = task.contacts.map(contact => {
+            const existing = normalizedNode.phonebook.find(item => item.phone === contact.phone && item.name === contact.name);
+            if (existing) return existing.id;
+            const record = { id: uid(), role: contact.role || "", name: contact.name || "", phone: contact.phone || "", carNumber: task.carNumber || "", address: task.address || "", comment: task.extraComment || "" };
+            normalizedNode.phonebook.push(record); return record.id;
+          });
+        }
+        delete normalizedTask.contacts; delete normalizedTask.carNumber; delete normalizedTask.address; delete normalizedTask.extraComment;
+        return normalizedTask;
+      }) : [];
     }
     return normalizedNode;
   }) : [];
@@ -444,9 +457,16 @@ function bindWorkspaceOnce() {
   $("#taskEditorForm").addEventListener("submit", saveTaskEditor);
   $("#taskEditorClose").addEventListener("click", closeTaskEditor);
   $("#taskEditorCancel").addEventListener("click", closeTaskEditor);
-  $("#taskAddContact").addEventListener("click", addTaskContactRow);
-  $("#taskContacts").addEventListener("click", handleTaskContactRemove);
   $("#taskScheduleMode").addEventListener("change", updateTaskScheduleFields);
+  $("#stageEditorForm").addEventListener("submit", saveStageEditor);
+  $("#stageEditorClose").addEventListener("click", closeStageEditor);
+  $("#budgetEditorForm").addEventListener("submit", saveBudgetEditor);
+  $("#budgetEditorClose").addEventListener("click", closeBudgetEditor);
+  $("#phonebookClose").addEventListener("click", closePhonebook);
+  $("#phonebookAdd").addEventListener("click", () => renderPhonebookEditor(null));
+  $("#phonebookBody").addEventListener("click", handlePhonebookClick);
+  $("#phonebookEditorForm").addEventListener("submit", savePhonebookContact);
+  $("#phonebookEditorCancel").addEventListener("click", () => renderPhonebookList(nodeById(state.activeNodeId)));
   $("#importInput").addEventListener("change", importDataFile);
   $("#assetClose").addEventListener("click", () => $("#assetViewer").close());
   $("#assetPrev").addEventListener("click", () => moveAssetViewer(-1));
@@ -884,7 +904,7 @@ function createProcessForProject(project) {
   const process = {
     id: uid(), type: "process", space: project.space, projectId: project.id,
     x: point.x, y: point.y, level: 2, title: `Рабочий процесс · ${project.title}`,
-    status: "active", progress: 0, stages: [], tasks: [], peopleIds: [], expenses: [], assets: [], archived: false
+    status: "active", progress: 0, stages: [], tasks: [], phonebook: [], peopleIds: [], expenses: [], assets: [], archived: false
   };
   state.data.nodes.push(process); state.data.links.push({ id: uid(), a: project.id, b: process.id, kind: "process" });
   state.selectedId = process.id; saveData(); render(); focusNode(process); setTimeout(() => openEditor(process), 220);
@@ -963,12 +983,18 @@ function processDetailHtml(node) {
   const project = nodeById(node.projectId);
   const total = (node.expenses || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const stages = node.stages || [];
+  const openTasks = (node.tasks || []).filter(task => !task.done).length;
   if (!stages.some(stage => stage.id === state.selectedProcessStageId)) state.selectedProcessStageId = stages[0]?.id || null;
   return `<div class="detail-hero process-detail-hero">${processCoverMediaHtml(node)}<div class="detail-hero-content"><p>${esc(project ? `Проект: ${project.title}` : "Связанный рабочий модуль")}</p></div></div>
-    <div class="detail-grid process-summary-row"><div class="detail-stat"><small>ПРОГРЕСС</small><b>${node.progress || 0}%</b></div><div class="detail-stat"><small>ЗАТРАТЫ</small><b>${money(total)}</b></div><div class="detail-stat"><small>ЭТАПЫ</small><b>${stages.length}</b></div><div class="detail-stat"><small>ЗАДАЧИ</small><b>${(node.tasks || []).filter(task => !task.done).length}</b></div></div>
-    <div class="detail-section"><div class="detail-section-head"><h3>Этапы</h3><button data-detail-action="editNode">Изменить</button></div><div class="stage-list process-stage-selector">${stages.length ? stages.map(stage => stageSelectorHtml(stage)).join("") : `<div class="note-block">Этапы ещё не добавлены.</div>`}</div></div>
+    <div class="process-metrics-bar">
+      <button class="process-metric budget-metric" data-budget-edit="1" title="Двойное нажатие для редактирования"><small>БЮДЖЕТ</small><b>${money(node.budget)}</b></button>
+      <div class="process-metric"><small>РАСХОДЫ</small><b>${money(total)}</b></div>
+      <div class="process-metric progress-metric"><small>ПРОГРЕСС</small><b>${node.progress || 0}%</b><i><span style="width:${clamp(node.progress||0,0,100)}%"></span></i></div>
+      <div class="process-metric stacked-count"><div><small>ЭТАПЫ</small><b>${stages.length}</b></div><div><small>ЗАДАЧИ</small><b>${openTasks}</b></div></div>
+      <button class="process-phonebook-button" data-detail-action="phonebook" aria-label="Телефонная книга">${icon("people")}<small>${(node.phonebook||[]).length}</small></button>
+    </div>
+    <div class="detail-section"><div class="detail-section-head"><h3>Этапы</h3></div><div class="stage-list process-stage-selector">${stages.length ? stages.map(stage => stageSelectorHtml(stage)).join("") : `<div class="note-block">Этапы ещё не добавлены.</div>`}</div></div>
     ${selectedStageTasksHtml(node)}
-    <div class="detail-section"><div class="detail-section-head"><h3>Связанные люди</h3><button data-detail-action="editNode">Изменить</button></div><div class="people-list">${peopleListHtml(node)}</div></div>
     <div class="detail-section"><div class="detail-section-head"><h3>Затраты</h3><button data-detail-action="editNode">Таблица</button></div><div class="inline-add"><input id="detailExpenseTitle" placeholder="Описание"><input id="detailExpenseAmount" inputmode="decimal" placeholder="Сумма"><button data-detail-action="quickExpense">+</button></div><div class="expense-list" style="margin-top:9px">${expenseListHtml(node)}</div></div>`;
 }
 function stageSelectorHtml(stage) {
@@ -979,16 +1005,16 @@ function selectedStageTasksHtml(node) {
   const stage = (node.stages || []).find(item => item.id === state.selectedProcessStageId);
   if (!stage) return "";
   const firstStageId=(node.stages||[])[0]?.id; const tasks = (node.tasks || []).filter(task => task.stageId === stage.id || (!task.stageId && stage.id===firstStageId));
-  return `<div class="detail-section stage-tasks-panel"><div class="detail-section-head"><div><small>ЗАДАЧИ КОНКРЕТНОГО ЭТАПА</small><h3>${esc(stage.title)}</h3></div><button class="stage-task-add" data-task-action="add" aria-label="Создать задачу">＋</button></div><div class="stage-task-list">${tasks.length ? tasks.map(task => stageTaskHtml(task)).join("") : `<div class="note-block">В этом этапе пока нет задач.</div>`}</div></div>`;
+  return `<div class="detail-section stage-tasks-panel"><div class="detail-section-head"><div><small>ЗАДАЧИ КОНКРЕТНОГО ЭТАПА</small><h3>${esc(stage.title)}</h3></div><button class="stage-task-add" data-task-action="add" aria-label="Создать задачу">＋</button></div><div class="stage-task-list">${tasks.length ? tasks.map(task => stageTaskHtml(node,task)).join("") : `<div class="note-block">В этом этапе пока нет задач.</div>`}</div></div>`;
 }
 function priorityLabel(priority) { return priority === "high" ? "Высокий" : priority === "low" ? "Низкий" : "Средний"; }
-function stageTaskHtml(task) {
+function stageTaskHtml(node, task) {
   const expanded = task.id === state.expandedProcessTaskId;
-  const contacts = Array.isArray(task.contacts) ? task.contacts : [];
+  const contacts = (task.contactIds || []).map(id => (node.phonebook || []).find(contact => contact.id === id)).filter(Boolean);
   return `<article class="stage-task-card ${expanded ? "expanded selected" : ""}" data-stage-task-id="${esc(task.id)}">
     <div class="stage-task-head"><label class="stage-task-check"><input type="checkbox" data-task-toggle="${esc(task.id)}" ${task.done ? "checked" : ""}><span></span></label><div class="stage-task-title"><b>${esc(task.title)}</b><small>${esc(priorityLabel(task.priority))}${task.dateTime ? ` · ${esc(task.dateTime.replace("T"," "))}` : ""}</small></div><div class="stage-task-actions"><button data-task-action="view" title="Открыть">${icon("open")}</button><button class="priority-${esc(task.priority || "medium")}" data-task-action="priority" title="Приоритет">!</button><button data-task-action="menu" title="Действия">•••</button></div></div>
     <div class="task-context-menu hidden"><button data-task-action="moveUp">↑ Вверх</button><button data-task-action="moveDown">↓ Вниз</button><button data-task-action="edit">Редактировать</button><button class="danger-text" data-task-action="delete">Удалить</button></div>
-    ${expanded ? `<div class="stage-task-expanded">${task.note ? `<div class="task-note"><small>ЗАМЕТКА</small><p>${esc(task.note)}</p></div>` : ""}<div class="task-contact-view"><small>ВРЕМЕННЫЕ КОНТАКТЫ</small>${contacts.length ? contacts.map(contact => `<div><span>${esc(contact.role || "Контакт")}</span><b>${esc(contact.name || "Без имени")}</b>${contact.phone ? `<a href="tel:${esc(contact.phone)}">${esc(contact.phone)}</a>` : ""}</div>`).join("") : `<p>Контакты не добавлены</p>`}</div><div class="task-time-view"><small>ВЫПОЛНЕНИЕ</small><b>${task.scheduleMode === "interval" ? `${esc(task.intervalStart || "—")} — ${esc(task.intervalEnd || "—")}` : esc(task.dateTime?.replace("T"," ") || "Дата не выбрана")}</b><span>${task.notify ? `🔔 Напомнить за ${esc(task.reminder || "15")} мин.` : "Уведомление выключено"}</span></div>${(task.carNumber || task.address || task.extraComment) ? `<details class="task-extra"><summary>Дополнительно</summary>${task.carNumber ? `<p><b>Машина:</b> ${esc(task.carNumber)}</p>` : ""}${task.address ? `<p><b>Адрес:</b> ${esc(task.address)}</p>` : ""}${task.extraComment ? `<p><b>Комментарий:</b> ${esc(task.extraComment)}</p>` : ""}</details>` : ""}</div>` : ""}
+    ${expanded ? `<div class="stage-task-expanded">${task.note ? `<div class="task-note"><small>ЗАМЕТКА</small><p>${esc(task.note)}</p></div>` : ""}<div class="task-contact-view"><small>НАЗНАЧЕННЫЕ КОНТАКТЫ</small>${contacts.length ? contacts.map(contact => `<div><span>${esc(contact.role || "Контакт")}</span><b>${esc(contact.name || "Без имени")}</b>${contact.phone ? `<a href="tel:${esc(contact.phone)}">${esc(contact.phone)}</a>` : ""}</div>`).join("") : `<p>Контакты не назначены</p>`}</div><div class="task-time-view"><small>ВЫПОЛНЕНИЕ</small><b>${task.scheduleMode === "interval" ? `${esc(task.intervalStart || "—")} — ${esc(task.intervalEnd || "—")}` : esc(task.dateTime?.replace("T"," ") || "Дата не выбрана")}</b><span>${task.notify ? `🔔 Напомнить за ${esc(task.reminder || "15")} мин.` : "Уведомление выключено"}</span></div></div>` : ""}
   </article>`;
 }
 function personDetailHtml(node) {
@@ -1060,8 +1086,14 @@ function handleDetailClick(event) {
   const assetButton = event.target.closest("[data-asset-index]");
   if (assetButton) return openAssetViewer(nodeById(state.activeNodeId), Number(assetButton.dataset.assetIndex));
   const node = nodeById(state.activeNodeId); if (!node) return;
+  const budgetButton = event.target.closest("[data-budget-edit]");
+  if (budgetButton && node.type === "process") { const now=performance.now(); if (state.lastBudgetTap && now-state.lastBudgetTap<340) { state.lastBudgetTap=0; openBudgetEditor(node); } else state.lastBudgetTap=now; return; }
   const stageButton = event.target.closest("[data-stage-select]");
-  if (stageButton && node.type === "process") { state.selectedProcessStageId = stageButton.dataset.stageSelect; state.expandedProcessTaskId = null; renderDetailBody(node); return; }
+  if (stageButton && node.type === "process") {
+    const stageId = stageButton.dataset.stageSelect; const now = performance.now();
+    if (state.lastStageTap?.id === stageId && now - state.lastStageTap.time < 340) { state.lastStageTap={id:null,time:0}; openStageEditor(node, stageId); return; }
+    state.lastStageTap={id:stageId,time:now}; state.selectedProcessStageId = stageId; state.expandedProcessTaskId = null; renderDetailBody(node); return;
+  }
   const taskToggle = event.target.closest("[data-task-toggle]");
   if (taskToggle) { const record=(node.tasks||[]).find(item=>item.id===taskToggle.dataset.taskToggle); if(record){record.done=taskToggle.checked;updateProcessProgress(node);saveData();renderDetailBody(node);render();} return; }
   const taskAction = event.target.closest("[data-task-action]");
@@ -1071,6 +1103,8 @@ function handleDetailClick(event) {
   if (action === "addAssets") { state.assetTargetNodeId = node.id; $("#assetInput").click(); }
   if (action === "openProcess") { const existing=state.data.nodes.find(item=>item.type==="process"&&item.projectId===node.id&&!item.archived); if(existing){state.selectedId=existing.id;render();focusNode(existing);openDetail(existing);}else createProcessForProject(node); }
   if (action === "editNode") openEditor(node);
+  if (action === "editBudget") openBudgetEditor(node);
+  if (action === "phonebook") openPhonebook(node);
   if (action === "quickExpense") { const title=$("#detailExpenseTitle")?.value.trim(); const amount=Number(String($("#detailExpenseAmount")?.value||"").replace(",",".")); if(!title||!amount)return toast("Введите описание и сумму"); node.expenses||=[];node.expenses.push({id:uid(),title,amount,date:todayISO()});saveData();renderDetailBody(node);render();toast("Добавлено в затраты"); }
 }
 function handleStageTaskAction(node, button) {
@@ -1086,19 +1120,33 @@ function handleStageTaskAction(node, button) {
   const a=tasks.indexOf(task),b=tasks.indexOf(target); [tasks[a],tasks[b]]=[tasks[b],tasks[a]]; saveData();renderDetailBody(node);
 }
 function openTaskEditor(node, task) {
-  const base=task?clone(task):{id:uid(),stageId:state.selectedProcessStageId,title:"Новая задача",priority:"medium",note:"",contacts:[],scheduleMode:"date",intervalStart:"",intervalEnd:"",dateTime:"",reminder:"15",notify:false,carNumber:"",address:"",extraComment:"",done:false};
+  const base=task?clone(task):{id:uid(),stageId:state.selectedProcessStageId,title:"Новая задача",priority:"medium",note:"",contactIds:[],scheduleMode:"date",intervalStart:"",intervalEnd:"",dateTime:"",reminder:"15",notify:false,done:false};
   state.taskDraft=base;
   $("#taskEditorTitle").textContent=task?"Редактировать задачу":"Новая задача";
-  $("#taskTitle").value=base.title||""; $("#taskNote").value=base.note||""; $("#taskPriority").value=base.priority||"medium"; $("#taskScheduleMode").value=base.scheduleMode||"date"; $("#taskIntervalStart").value=base.intervalStart||""; $("#taskIntervalEnd").value=base.intervalEnd||""; $("#taskDateTime").value=base.dateTime||""; $("#taskReminder").value=base.reminder||"15"; $("#taskNotify").checked=Boolean(base.notify); $("#taskCarNumber").value=base.carNumber||""; $("#taskAddress").value=base.address||""; $("#taskExtraComment").value=base.extraComment||"";
-  renderTaskContactRows(base.contacts||[]); updateTaskScheduleFields(); const dialog=$("#taskEditorDialog"); if(!dialog.open)dialog.showModal();
+  $("#taskTitle").value=base.title||""; $("#taskNote").value=base.note||""; $("#taskPriority").value=base.priority||"medium"; $("#taskScheduleMode").value=base.scheduleMode||"date"; $("#taskIntervalStart").value=base.intervalStart||""; $("#taskIntervalEnd").value=base.intervalEnd||""; $("#taskDateTime").value=base.dateTime||""; $("#taskReminder").value=base.reminder||"15"; $("#taskNotify").checked=Boolean(base.notify);
+  renderTaskContactPicker(node, base.contactIds||[]); updateTaskScheduleFields(); const dialog=$("#taskEditorDialog"); if(!dialog.open)dialog.showModal();
 }
 function closeTaskEditor(){if($("#taskEditorDialog").open)$("#taskEditorDialog").close();state.taskDraft=null;}
-function renderTaskContactRows(contacts){$("#taskContacts").innerHTML=(contacts.length?contacts:[{role:"",name:"",phone:""}]).map((c,i)=>`<div class="task-contact-row" data-contact-index="${i}"><input data-contact-role placeholder="Роль" value="${esc(c.role||"")}"><input data-contact-name placeholder="Имя" value="${esc(c.name||"")}"><input data-contact-phone type="tel" placeholder="Номер телефона" value="${esc(c.phone||"")}"><button type="button" data-remove-contact="${i}">×</button></div>`).join("");}
-function readTaskContacts(){return $$(".task-contact-row",$("#taskContacts")).map(row=>({role:$("[data-contact-role]",row).value.trim(),name:$("[data-contact-name]",row).value.trim(),phone:$("[data-contact-phone]",row).value.trim()})).filter(c=>c.role||c.name||c.phone);}
-function addTaskContactRow(){const contacts=readTaskContacts();contacts.push({role:"",name:"",phone:""});renderTaskContactRows(contacts);}
-function handleTaskContactRemove(event){const b=event.target.closest("[data-remove-contact]");if(!b)return;const contacts=readTaskContacts();contacts.splice(Number(b.dataset.removeContact),1);renderTaskContactRows(contacts);}
+function renderTaskContactPicker(node, selectedIds){
+  const contacts=node.phonebook||[];
+  $("#taskContactPicker").innerHTML=contacts.length?contacts.map(c=>`<label class="task-contact-choice"><input type="checkbox" value="${esc(c.id)}" ${selectedIds.includes(c.id)?"checked":""}><span><b>${esc(c.name||"Без имени")}</b><small>${esc(c.role||"Контакт")}${c.phone?` · ${esc(c.phone)}`:""}</small></span></label>`).join(""):`<div class="note-block">Сначала добавьте контакт в телефонную книгу рабочего процесса.</div>`;
+}
+function readTaskContactIds(){return $$('#taskContactPicker input:checked').map(input=>input.value);}
 function updateTaskScheduleFields(){const interval=$("#taskScheduleMode").value==="interval";$("#taskIntervalFields").classList.toggle("hidden",!interval);$("#taskDateField").classList.toggle("hidden",interval);}
-function saveTaskEditor(event){event.preventDefault();const node=nodeById(state.activeNodeId);if(!node||node.type!=="process"||!state.taskDraft)return;const d=state.taskDraft;d.title=$("#taskTitle").value.trim()||"Новая задача";d.note=$("#taskNote").value.trim();d.priority=$("#taskPriority").value;d.contacts=readTaskContacts();d.scheduleMode=$("#taskScheduleMode").value;d.intervalStart=$("#taskIntervalStart").value;d.intervalEnd=$("#taskIntervalEnd").value;d.dateTime=$("#taskDateTime").value;d.reminder=$("#taskReminder").value;d.notify=$("#taskNotify").checked;d.carNumber=$("#taskCarNumber").value.trim();d.address=$("#taskAddress").value.trim();d.extraComment=$("#taskExtraComment").value.trim();d.stageId=d.stageId||state.selectedProcessStageId;node.tasks||=[];const idx=node.tasks.findIndex(t=>t.id===d.id);if(idx>=0)node.tasks[idx]=d;else node.tasks.push(d);state.expandedProcessTaskId=d.id;updateProcessProgress(node);saveData();closeTaskEditor();renderDetailBody(node);render();toast("Задача сохранена");}
+function saveTaskEditor(event){event.preventDefault();const node=nodeById(state.activeNodeId);if(!node||node.type!=="process"||!state.taskDraft)return;const d=state.taskDraft;d.title=$("#taskTitle").value.trim()||"Новая задача";d.note=$("#taskNote").value.trim();d.priority=$("#taskPriority").value;d.contactIds=readTaskContactIds();d.scheduleMode=$("#taskScheduleMode").value;d.intervalStart=$("#taskIntervalStart").value;d.intervalEnd=$("#taskIntervalEnd").value;d.dateTime=$("#taskDateTime").value;d.reminder=$("#taskReminder").value;d.notify=$("#taskNotify").checked;d.stageId=d.stageId||state.selectedProcessStageId;node.tasks||=[];const idx=node.tasks.findIndex(t=>t.id===d.id);if(idx>=0)node.tasks[idx]=d;else node.tasks.push(d);state.expandedProcessTaskId=d.id;updateProcessProgress(node);saveData();closeTaskEditor();renderDetailBody(node);render();toast("Задача сохранена");}
+
+function openStageEditor(node, stageId){const stage=(node.stages||[]).find(item=>item.id===stageId);if(!stage)return;state.stageEditDraft={nodeId:node.id,stageId};$("#stageEditTitle").value=stage.title||"";$("#stageEditDate").value=stage.deadline||"";const d=$("#stageEditorDialog");if(!d.open)d.showModal();}
+function closeStageEditor(){if($("#stageEditorDialog").open)$("#stageEditorDialog").close();state.stageEditDraft=null;}
+function saveStageEditor(event){event.preventDefault();const draft=state.stageEditDraft,node=nodeById(draft?.nodeId),stage=(node?.stages||[]).find(item=>item.id===draft?.stageId);if(!stage)return;stage.title=$("#stageEditTitle").value.trim()||"Новый этап";stage.deadline=$("#stageEditDate").value;saveData();closeStageEditor();renderDetailBody(node);render();toast("Этап сохранён");}
+function openBudgetEditor(node){$("#budgetEditValue").value=node.budget||"";const d=$("#budgetEditorDialog");if(!d.open)d.showModal();}
+function closeBudgetEditor(){if($("#budgetEditorDialog").open)$("#budgetEditorDialog").close();}
+function saveBudgetEditor(event){event.preventDefault();const node=nodeById(state.activeNodeId);if(!node)return;node.budget=Number(String($("#budgetEditValue").value||0).replace(",","."));saveData();closeBudgetEditor();renderDetailBody(node);render();toast("Бюджет сохранён");}
+function openPhonebook(node){renderPhonebookList(node);const d=$("#phonebookDialog");if(!d.open)d.showModal();}
+function closePhonebook(){if($("#phonebookDialog").open)$("#phonebookDialog").close();state.phonebookEditId=null;}
+function renderPhonebookList(node){state.phonebookEditId=null;const contacts=node?.phonebook||[];$("#phonebookBody").innerHTML=contacts.length?contacts.map(c=>`<article class="phonebook-card" data-phonebook-id="${esc(c.id)}"><div><b>${esc(c.name||"Без имени")}</b><small>${esc(c.role||"Контакт")}</small>${c.phone?`<a href="tel:${esc(c.phone)}">${esc(c.phone)}</a>`:""}</div><button data-phonebook-action="edit">Редактировать</button><button class="danger-text" data-phonebook-action="delete">Удалить</button></article>`).join(""):`<div class="note-block">Телефонная книга пока пуста.</div>`;$("#phonebookEditorWrap").classList.add("hidden");}
+function renderPhonebookEditor(contact){state.phonebookEditId=contact?.id||null;$("#phonebookEditorWrap").classList.remove("hidden");$("#phonebookName").value=contact?.name||"";$("#phonebookRole").value=contact?.role||"";$("#phonebookPhone").value=contact?.phone||"";$("#phonebookCar").value=contact?.carNumber||"";$("#phonebookAddress").value=contact?.address||"";$("#phonebookComment").value=contact?.comment||"";}
+function handlePhonebookClick(event){const card=event.target.closest('[data-phonebook-id]'),button=event.target.closest('[data-phonebook-action]');if(!card||!button)return;const node=nodeById(state.activeNodeId),contact=(node.phonebook||[]).find(c=>c.id===card.dataset.phonebookId);if(button.dataset.phonebookAction==='edit')renderPhonebookEditor(contact);if(button.dataset.phonebookAction==='delete'&&confirm(`Удалить контакт «${contact?.name||'Без имени'}»?`)){node.phonebook=(node.phonebook||[]).filter(c=>c.id!==contact.id);(node.tasks||[]).forEach(t=>t.contactIds=(t.contactIds||[]).filter(id=>id!==contact.id));saveData();renderPhonebookList(node);renderDetailBody(node);}}
+function savePhonebookContact(event){event.preventDefault();const node=nodeById(state.activeNodeId);if(!node)return;node.phonebook||=[];let c=node.phonebook.find(x=>x.id===state.phonebookEditId);if(!c){c={id:uid()};node.phonebook.push(c)}Object.assign(c,{name:$("#phonebookName").value.trim(),role:$("#phonebookRole").value.trim(),phone:$("#phonebookPhone").value.trim(),carNumber:$("#phonebookCar").value.trim(),address:$("#phonebookAddress").value.trim(),comment:$("#phonebookComment").value.trim()});saveData();renderPhonebookList(node);renderDetailBody(node);toast("Контакт сохранён");}
 
 function updateProcessProgress(node) {
   if (node.type !== "process") return;
@@ -1109,6 +1157,7 @@ function updateProcessProgress(node) {
 
 /* Editor */
 function openEditor(node) {
+  state.detailScrollTop = $("#detailBody")?.scrollTop || 0;
   state.activeNodeId = node.id; state.editDraft = clone(node);
   $("#detailDialog").open && $("#detailDialog").close();
   $("#editorType").textContent = `${TYPE_LABELS[node.type].toUpperCase()} · РЕДАКТИРОВАНИЕ`;
@@ -1272,7 +1321,7 @@ function updateProcessActionLock(node) {
 }
 function bindProcessActionLock() {
   const control=$("#processActionLock"), track=$(".process-lock-track",control), thumb=$(".process-lock-thumb",control); let drag=null;
-  const setPos=r=>{thumb.style.transform=`translateX(${clamp(r,0,1)*22}px)`};
+  const setPos=r=>{const max=Math.max(0,track.clientWidth-thumb.offsetWidth-4);thumb.style.transform=`translateX(${clamp(r,0,1)*max}px)`};
   control.addEventListener("pointerdown",e=>{if(state.processActionsUnlocked)return; const rect=track.getBoundingClientRect(); drag={left:rect.left,width:Math.max(1,rect.width-20)}; control.setPointerCapture?.(e.pointerId); setPos((e.clientX-drag.left)/drag.width)});
   control.addEventListener("pointermove",e=>{if(drag)setPos((e.clientX-drag.left)/drag.width)});
   control.addEventListener("pointerup",e=>{if(!drag)return; const ratio=(e.clientX-drag.left)/drag.width; drag=null; if(ratio>=.78){state.processActionsUnlocked=true;navigator.vibrate?.(16);updateProcessActionLock(nodeById(state.activeNodeId))}else setPos(0)});
@@ -1304,7 +1353,7 @@ function saveEditor(event) {
   if (d.type === "process") updateProcessProgress(d);
   const index = state.data.nodes.findIndex(node => node.id === d.id);
   if (index >= 0) state.data.nodes[index] = d;
-  state.editDraft = null; saveData(); closeEditor(); render(); toast("Карточка сохранена");
+  const savedId=d.id; state.editDraft = null; saveData(); closeEditor(); render(); const saved=nodeById(savedId); if(saved){openDetail(saved); requestAnimationFrame(()=>{$("#detailBody").scrollTop=state.detailScrollTop||0;});} toast("Карточка сохранена");
 }
 function archiveActiveNode() {
   const node = nodeById(state.activeNodeId); if (!node) return;
