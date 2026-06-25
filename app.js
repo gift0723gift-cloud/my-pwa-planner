@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.21";
+const VERSION = "6.0.23";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -485,12 +485,19 @@ function bindWorkspaceOnce() {
   $("#coverQuickPosition").addEventListener("click", startQuickPositionCover);
   $("#detailBody").addEventListener("dblclick", event => {
     const target = event.target.closest("[data-budget-edit]");
+    const coverShell = event.target.closest("[data-detail-cover-shell]");
     const node = nodeById(state.activeNodeId);
     if (target && node?.type === "process") {
       event.preventDefault();
       event.stopPropagation();
       state.lastBudgetTap = 0;
       openBudgetEditor(node);
+      return;
+    }
+    if (coverShell && node?.type === "process") {
+      event.preventDefault();
+      event.stopPropagation();
+      openCoverQuickMenu(node);
     }
   });
   $("#detailBody").addEventListener("click", handleMessengerBadgeTap);
@@ -1022,10 +1029,9 @@ function processCoverStyle(position) {
   const scale = Math.max(1, Number(position?.scale || 1));
   const x = clamp(Number(position?.x || 0), -50, 50);
   const y = clamp(Number(position?.y || 0), -50, 50);
-  const maxShift = scale > 1 ? ((scale - 1) / (2 * scale)) * 100 : 0;
-  const tx = (x / 50) * maxShift;
-  const ty = (y / 50) * maxShift;
-  return `object-fit:contain;object-position:50% 50%;transform:translate3d(${tx}%,${ty}%,0) scale(${scale})`;
+  const objectX = clamp(50 + x, 0, 100);
+  const objectY = clamp(50 + y, 0, 100);
+  return `object-fit:cover;object-position:${objectX}% ${objectY}%;transform:scale(${scale})`;
 }
 function processCoverMediaHtml(node) {
   if (!node.coverAssetId) return "";
@@ -1038,7 +1044,7 @@ function processDetailHtml(node) {
   const stages = node.stages || [];
   const openTasks = (node.tasks || []).filter(task => !task.done).length;
   if (!stages.some(stage => stage.id === state.selectedProcessStageId)) state.selectedProcessStageId = stages[0]?.id || null;
-  return `<div class="detail-hero process-detail-hero">${processCoverMediaHtml(node)}<button class="process-cover-menu-button" data-detail-action="coverMenu" aria-label="Управление обложкой">•••</button><div class="detail-hero-content"><p>${esc(project ? `Проект: ${project.title}` : "Связанный рабочий модуль")}</p></div></div>
+  return `<div class="detail-hero process-detail-hero" data-detail-cover-shell="1" title="Двойное нажатие для настройки обложки">${processCoverMediaHtml(node)}<div class="detail-hero-content"><p>${esc(project ? `Проект: ${project.title}` : "Связанный рабочий модуль")}</p></div></div>
     <div class="process-metrics-bar">
       <button type="button" class="process-metric budget-metric" data-budget-edit="1" aria-label="Планируемый бюджет. Двойное нажатие для редактирования" title="Двойное нажатие для редактирования"><small>БЮДЖЕТ</small><b>${money(node.budget)}</b></button>
       <div class="process-metric"><small>РАСХОДЫ</small><b>${money(total)}</b></div>
@@ -1077,7 +1083,7 @@ function stageTaskHtml(node, task) {
   const contacts = (task.contactIds || []).map(id => (node.phonebook || []).find(contact => contact.id === id)).filter(Boolean);
   const timeText = task.scheduleMode === "interval" ? `${formatTaskDateTime(task.intervalStart)} — ${formatTaskDateTime(task.intervalEnd)}` : formatTaskDateTime(task.dateTime);
   return `<article class="stage-task-card ${expanded ? "expanded selected" : ""}" data-stage-task-id="${esc(task.id)}">
-    <div class="stage-task-head"><label class="stage-task-check"><input type="checkbox" data-task-toggle="${esc(task.id)}" ${task.done ? "checked" : ""}><span></span></label><div class="stage-task-title"><b>${esc(task.title)}</b><small>${esc(priorityLabel(task.priority))}${task.dateTime ? ` · ${esc(formatTaskDateTime(task.dateTime))}` : ""}</small></div><div class="stage-task-actions"><button data-task-action="view" title="Открыть">${icon("open")}</button><button class="priority-orb priority-${esc(task.priority || "medium")}" data-task-action="priority" title="Изменить приоритет" aria-label="Приоритет: ${esc(priorityLabel(task.priority))}"><span></span></button></div></div>
+    <div class="stage-task-head"><label class="stage-task-check"><input type="checkbox" data-task-toggle="${esc(task.id)}" ${task.done ? "checked" : ""}><span></span></label><div class="stage-task-title"><b>${esc(task.title)}</b><small>${esc(priorityLabel(task.priority))}${task.dateTime ? ` · ${esc(formatTaskDateTime(task.dateTime))}` : ""}</small></div><div class="stage-task-actions"><button data-task-action="view" title="Открыть">${icon("open")}</button><button class="priority-orb priority-${esc(task.priority || "medium")} ${task.done ? "is-done" : ""}" data-task-action="priority" title="Изменить приоритет" aria-label="Приоритет: ${esc(priorityLabel(task.priority))}"><span></span></button></div></div>
     ${expanded ? `<div class="stage-task-expanded">${task.note ? `<div class="task-note"><small>ЗАМЕТКА</small><p>${esc(String(task.note).slice(0,400))}</p></div>` : ""}<div class="task-contact-view"><small>НАЗНАЧЕННЫЕ КОНТАКТЫ</small>${contacts.length ? contacts.map(contact => `<article class="task-contact-card"><div class="task-contact-copy"><span class="task-contact-role">${esc(contact.role || "Контакт")}</span><b>${esc(contact.name || "Без имени")}</b>${contact.phone ? `<a class="task-contact-number" href="tel:${esc(contact.phone)}">${esc(contact.phone)}</a>` : ""}</div><div class="task-contact-messengers">${messengerBadges(contact)}</div></article>`).join("") : `<p>Контакты не назначены</p>`}</div><div class="task-time-view"><small>ВЫПОЛНЕНИЕ</small><b>${esc(timeText)}</b><span>${task.notify ? `🔔 Напомнить за ${esc(task.reminder || "15")} мин.` : "Уведомление выключено"}</span></div><div class="task-expanded-actions"><button type="button" data-task-action="edit" aria-label="Редактировать задачу">${icon("edit")}</button></div></div>` : ""}
   </article>`;
 }
@@ -1485,7 +1491,6 @@ function setProcessCoverMode(mode) {
 function updateProcessCoverPreview() {
   const position = currentProcessCoverPosition(); if (!position) return;
   position.scale = Math.max(1, Number($("#processCoverScale").value || 1));
-  if (position.scale <= 1.001) { position.x = 0; position.y = 0; }
   position.x = clamp(Number(position.x || 0), -50, 50);
   position.y = clamp(Number(position.y || 0), -50, 50);
   const preview = $("#processCoverPreview");
@@ -1543,7 +1548,6 @@ function bindProcessCoverPositioning() {
     const position = currentProcessCoverPosition();
     if (!drag || drag.id !== event.pointerId || !position) return;
     event.preventDefault();
-    if (Number(position.scale || 1) <= 1.001) return;
     const rect = frame.getBoundingClientRect();
     const dx = event.clientX - drag.x;
     const dy = event.clientY - drag.y;

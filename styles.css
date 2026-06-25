@@ -641,3 +641,68 @@ html[data-theme="light"] .process-cover-menu-button{background:#ffffffcc;color:#
   .task-time-view{margin-top:12px!important;padding-top:17px!important;padding-bottom:9px!important}
   .task-expanded-actions{min-height:54px!important}
 }
+
+
+/* v6.0.22 — cover fill mode and task schedule field alignment */
+.cover-position-frame img,.process-cover-media,.process-cover-thumb img{
+  object-fit:cover!important;
+  object-position:50% 50%;
+  transform-origin:center center!important;
+}
+.cover-position-frame{overflow:hidden!important}
+.task-editor-dialog .editor-group,
+.task-editor-dialog .field-grid,
+.task-editor-dialog .field,
+.task-editor-dialog .task-reminder-row{
+  min-width:0!important;
+  max-width:100%!important;
+  width:100%!important;
+  box-sizing:border-box!important;
+}
+.task-editor-dialog .field-grid{
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;
+}
+.task-editor-dialog .field-grid>.field{min-width:0!important}
+.task-editor-dialog .field input,
+.task-editor-dialog .field select,
+.task-editor-dialog .field textarea{
+  display:block!important;
+  width:100%!important;
+  min-width:0!important;
+  max-width:100%!important;
+  box-sizing:border-box!important;
+}
+.task-editor-dialog input[type="datetime-local"]{
+  -webkit-appearance:none!important;
+  appearance:none!important;
+  overflow:hidden!important;
+}
+.task-editor-dialog .task-reminder-row{
+  grid-template-columns:minmax(0,1fr) 56px!important;
+}
+@media(max-width:520px){
+  .task-editor-dialog .field-grid{grid-template-columns:minmax(0,1fr)!important}
+  .task-editor-dialog .task-reminder-row{grid-template-columns:minmax(0,1fr) 56px!important}
+}
+
+
+/* v6.0.23 — process cover interaction and refined priority indicators */
+.process-detail-hero{position:relative!important;overflow:hidden!important;border-radius:24px!important;isolation:isolate;touch-action:manipulation}
+.process-detail-hero::before{content:"";position:absolute;inset:0;padding:1.25px;border-radius:24px;background:linear-gradient(90deg,var(--purple) 0%,#7f7eff 48%,var(--cyan) 100%);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;z-index:2;opacity:.98;box-shadow:0 0 0 1px rgba(112,128,255,.16),0 0 20px rgba(98,221,236,.12)}
+.process-detail-hero::after{z-index:1!important}
+.process-cover-media{z-index:0!important}
+.process-detail-hero .detail-hero-content{z-index:3!important}
+.process-detail-hero[data-detail-cover-shell]{cursor:pointer}
+.process-cover-menu-button{display:none!important}
+.stage-task-check span{position:relative;display:grid!important;place-items:center!important;background:rgba(12,16,24,.3)}
+.stage-task-check input:checked+span{background:rgba(255,255,255,.04)!important;border-color:rgba(240,245,255,.72)!important;box-shadow:0 0 0 1px rgba(130,148,255,.14)}
+.stage-task-check input:checked+span::after{content:"";position:absolute;left:50%;top:50%;width:10px;height:6px;border-left:2px solid #fff;border-bottom:2px solid #fff;transform:translate(-50%,-62%) rotate(-45deg)}
+.priority-orb{position:relative!important;overflow:hidden!important}
+.priority-orb>span{display:block;border-radius:50%;background:linear-gradient(135deg,var(--purple) 0%,#7d7eff 52%,var(--cyan) 100%);box-shadow:0 0 10px rgba(98,221,236,.14),0 0 18px rgba(127,114,255,.18);animation-name:priorityPulseV623;animation-timing-function:ease-in-out;animation-iteration-count:infinite;transform-origin:center center}
+.priority-orb.priority-high>span{width:16px;height:16px;animation-duration:1.15s}
+.priority-orb.priority-medium>span{width:13px;height:13px;animation-duration:1.8s}
+.priority-orb.priority-low>span{width:10px;height:10px;animation-duration:2.55s;opacity:.96}
+.priority-orb.is-done>span{animation:none!important;transform:none!important;box-shadow:0 0 10px rgba(98,221,236,.18),0 0 18px rgba(127,114,255,.22)}
+.stage-task-actions .priority-high,.stage-task-actions .priority-medium,.stage-task-actions .priority-low{color:inherit!important}
+@keyframes priorityPulseV623{0%,100%{transform:scale(.92);filter:saturate(.95);opacity:.88}45%{transform:scale(1.12);filter:saturate(1.08);opacity:1}70%{transform:scale(1.02);opacity:.96}}
+@media(max-width:520px){.process-detail-hero::before{padding:1.1px}.priority-orb.priority-high>span{width:15px;height:15px}.priority-orb.priority-medium>span{width:12px;height:12px}.priority-orb.priority-low>span{width:9px;height:9px}}
