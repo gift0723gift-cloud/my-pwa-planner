@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.24";
+const VERSION = "6.0.25";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -41,6 +41,8 @@ function icon(name, className = "") {
     today: `<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5l3.5 2"/>`,
     results: `<path d="M6 19V9m6 10V5m6 14v-7"/><path d="m5 7 4-3 3 2 6-4"/>`,
     archive: `<path d="M4 7h16v3H4zM6 10v9h12v-9M9 14h6"/>`,
+    archiveSend: `<path d="M4 7h16v3H4zM6 10v9h12v-9M9 15h6"/><path d="M12 3v7m0 0-3-3m3 3 3-3"/>`,
+    archiveList: `<path d="M4 5h16v4H4zM5.5 9v10h13V9M8 13h8M8 16h5"/>`,
     open: `<path d="M2.8 12s3.2-5 9.2-5 9.2 5 9.2 5-3.2 5-9.2 5-9.2-5-9.2-5Z"/><circle cx="12" cy="12" r="2.4"/>`,
     branch: `<circle cx="6" cy="5" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="18" cy="18" r="2"/><path d="M8 5h3a4 4 0 0 1 4 4v7M15 9h1"/>`,
     expand: `<path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/>`,
@@ -102,6 +104,9 @@ const state = {
   quickCoverNodeId: null,
   quickCoverOriginalAssetId: null,
   quickCoverPendingAssetId: null,
+  taskArchivePending: null,
+  taskArchiveTap: { id: null, time: 0 },
+  taskArchiveExpandedId: null,
   phonebookEditId: null,
   phonebookRelationsContactId: null,
   detailScrollTop: 0,
@@ -211,7 +216,7 @@ function normalizeData(data) {
       normalizedNode.phonebook = Array.isArray(normalizedNode.phonebook) ? normalizedNode.phonebook.map(contact => ({ ...contact, messengers: Array.isArray(contact.messengers) ? contact.messengers : [] })) : [];
       const fallbackStageId = normalizedNode.stages[0]?.id || "";
       normalizedNode.tasks = Array.isArray(normalizedNode.tasks) ? normalizedNode.tasks.map(task => {
-        const normalizedTask = { priority: "medium", note: "", contactIds: [], scheduleMode: "date", intervalStart: "", intervalEnd: "", dateTime: "", reminder: "15", notify: false, stageId: task.stageId || fallbackStageId, ...task };
+        const normalizedTask = { priority: "medium", note: "", contactIds: [], scheduleMode: "date", intervalStart: "", intervalEnd: "", dateTime: "", reminder: "15", notify: false, archived: false, archivedAt: "", archivedStageId: "", archivedStageTitle: "", stageId: task.stageId || fallbackStageId, ...task };
         normalizedTask.note = String(normalizedTask.note || "").slice(0, 400);
         if ((!normalizedTask.contactIds || !normalizedTask.contactIds.length) && Array.isArray(task.contacts)) {
           normalizedTask.contactIds = task.contacts.map(contact => {
@@ -527,6 +532,11 @@ function bindWorkspaceOnce() {
   $("#messengerActionClose").addEventListener("click", closeMessengerAction);
   $("#messengerActionWrite").addEventListener("click", () => runMessengerAction("write"));
   $("#messengerActionCall").addEventListener("click", () => runMessengerAction("call"));
+  $("#taskArchiveConfirmClose")?.addEventListener("click", closeTaskArchiveConfirm);
+  $("#taskArchiveConfirmNo")?.addEventListener("click", closeTaskArchiveConfirm);
+  $("#taskArchiveConfirmYes")?.addEventListener("click", confirmArchiveTask);
+  $("#taskArchiveClose")?.addEventListener("click", closeTaskArchive);
+  $("#taskArchiveBody")?.addEventListener("click", handleTaskArchiveClick);
   $("#importInput").addEventListener("change", importDataFile);
   $("#assetClose").addEventListener("click", () => $("#assetViewer").close());
   $("#assetPrev").addEventListener("click", () => moveAssetViewer(-1));
@@ -570,7 +580,7 @@ function cardClass(node) {
 }
 function nodeSubtitle(node) {
   if (node.type === "project") return node.client || node.address || "Новый проект";
-  if (node.type === "process") return `${(node.stages || []).length} этапа · ${(node.tasks || []).filter(task => !task.done).length} задач`;
+  if (node.type === "process") return `${(node.stages || []).length} этапа · ${(node.tasks || []).filter(task => !task.done && !task.archived).length} задач`;
   if (node.type === "person") return node.speciality || "Специалист";
   if (node.type === "idea") return node.source || "Сохранённая идея";
   return node.metric || (node.deadline ? `до ${node.deadline}` : "Личная цель");
@@ -583,7 +593,7 @@ function nodeMetrics(node) {
     const process = state.data.nodes.find(item => item.type === "process" && item.projectId === node.id && !item.archived);
     return metricHtml("files", files) + metricHtml("task", process ? (process.tasks || []).filter(task => !task.done).length : 0) + metricHtml("budget", node.budget ? money(node.budget) : "—");
   }
-  if (node.type === "process") return metricHtml("task", (node.tasks || []).filter(task => !task.done).length) + metricHtml("people", (node.peopleIds || []).length) + metricHtml("budget", (node.expenses || []).reduce((sum, item) => sum + Number(item.amount || 0), 0).toLocaleString("ru-RU"));
+  if (node.type === "process") return metricHtml("task", (node.tasks || []).filter(task => !task.done && !task.archived).length) + metricHtml("people", (node.peopleIds || []).length) + metricHtml("budget", (node.expenses || []).reduce((sum, item) => sum + Number(item.amount || 0), 0).toLocaleString("ru-RU"));
   if (node.type === "person") return metricHtml("link", (node.tags || "").split(",").filter(Boolean).length) + metricHtml("task", tasksForPerson(node.id).filter(task => !task.done).length);
   if (node.type === "idea") return metricHtml("image", (node.assets || []).length) + metricHtml("link", linkNodesFor(node.id).length);
   return metricHtml("calendar", node.deadline || "без срока") + metricHtml("results", `${node.progress || 0}%`);
@@ -1045,7 +1055,7 @@ function processDetailHtml(node) {
   const project = nodeById(node.projectId);
   const total = (node.expenses || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const stages = node.stages || [];
-  const openTasks = (node.tasks || []).filter(task => !task.done).length;
+  const openTasks = (node.tasks || []).filter(task => !task.done && !task.archived).length;
   if (!stages.some(stage => stage.id === state.selectedProcessStageId)) state.selectedProcessStageId = stages[0]?.id || null;
   return `<div class="detail-hero process-detail-hero" data-detail-cover-shell="1" title="Двойное нажатие для настройки обложки">${processCoverMediaHtml(node)}<div class="detail-hero-content"><p>${esc(project ? `Проект: ${project.title}` : "Связанный рабочий модуль")}</p></div></div>
     <div class="process-metrics-bar">
@@ -1056,7 +1066,7 @@ function processDetailHtml(node) {
       <button type="button" class="process-phonebook-button interactive-metric" data-detail-action="phonebook" aria-label="Роли. Открыть телефонную книгу"><small>РОЛИ</small><b>${(node.phonebook||[]).length}</b></button>
     </div>
     <div class="process-progress-row"><div><small>ПРОГРЕСС</small><b>${node.progress || 0}%</b></div><i><span style="width:${clamp(node.progress||0,0,100)}%"></span></i></div>
-    <div class="detail-section"><div class="detail-section-head"><h3>Этапы</h3><button class="delicate-plus" data-detail-action="addStage" aria-label="Создать новый этап">＋</button></div><div class="stage-list process-stage-selector">${stages.length ? stages.map(stage => stageSelectorHtml(stage)).join("") : `<div class="note-block">Этапы ещё не добавлены.</div>`}</div></div>
+    <div class="detail-section"><div class="detail-section-head"><h3>Этапы</h3><div class="stage-heading-actions"><button class="task-archive-open-button" data-detail-action="taskArchive" aria-label="Открыть общий архив задач" title="Общий архив">${icon("archiveList")}</button><button class="delicate-plus" data-detail-action="addStage" aria-label="Создать новый этап">＋</button></div></div><div class="stage-list process-stage-selector">${stages.length ? stages.map(stage => stageSelectorHtml(stage)).join("") : `<div class="note-block">Этапы ещё не добавлены.</div>`}</div></div>
     ${selectedStageTasksHtml(node)}
     <div class="detail-section"><div class="detail-section-head"><h3>Затраты</h3><button data-detail-action="editNode">Таблица</button></div><div class="inline-add"><input id="detailExpenseTitle" placeholder="Описание"><input id="detailExpenseAmount" inputmode="decimal" placeholder="Сумма"><button data-detail-action="quickExpense">+</button></div><div class="expense-list" style="margin-top:9px">${expenseListHtml(node)}</div></div>`;
 }
@@ -1067,7 +1077,7 @@ function stageSelectorHtml(stage) {
 function selectedStageTasksHtml(node) {
   const stage = (node.stages || []).find(item => item.id === state.selectedProcessStageId);
   if (!stage) return "";
-  const firstStageId=(node.stages||[])[0]?.id; const tasks = (node.tasks || []).filter(task => task.stageId === stage.id || (!task.stageId && stage.id===firstStageId));
+  const firstStageId=(node.stages||[])[0]?.id; const tasks = (node.tasks || []).filter(task => !task.archived && (task.stageId === stage.id || (!task.stageId && stage.id===firstStageId)));
   return `<div class="detail-section stage-tasks-panel"><div class="detail-section-head"><div><small>ЗАДАЧИ КОНКРЕТНОГО ЭТАПА</small><h3>${esc(stage.title)}</h3></div><button class="stage-task-add" data-task-action="add" aria-label="Создать задачу">＋</button></div><div class="stage-task-list">${tasks.length ? tasks.map(task => stageTaskHtml(node,task)).join("") : `<div class="note-block">В этом этапе пока нет задач.</div>`}</div></div>`;
 }
 function priorityLabel(priority) { return priority === "high" ? "Высокий" : priority === "low" ? "Низкий" : "Средний"; }
@@ -1087,7 +1097,7 @@ function stageTaskHtml(node, task) {
   const timeText = task.scheduleMode === "interval" ? `${formatTaskDateTime(task.intervalStart)} — ${formatTaskDateTime(task.intervalEnd)}` : formatTaskDateTime(task.dateTime);
   return `<article class="stage-task-card ${expanded ? "expanded selected" : ""}" data-stage-task-id="${esc(task.id)}">
     <div class="stage-task-head"><label class="stage-task-check"><input type="checkbox" data-task-toggle="${esc(task.id)}" ${task.done ? "checked" : ""}><span></span></label><div class="stage-task-title"><b>${esc(task.title)}</b><small>${esc(priorityLabel(task.priority))}${task.dateTime ? ` · ${esc(formatTaskDateTime(task.dateTime))}` : ""}</small></div><div class="stage-task-actions"><button data-task-action="view" title="Открыть">${icon("open")}</button><button class="priority-orb priority-${esc(task.priority || "medium")} ${task.done ? "is-done" : ""}" data-task-action="priority" title="Изменить приоритет" aria-label="Приоритет: ${esc(priorityLabel(task.priority))}"><span></span></button></div></div>
-    ${expanded ? `<div class="stage-task-expanded">${task.note ? `<div class="task-note"><small>ЗАМЕТКА</small><p>${esc(String(task.note).slice(0,400))}</p></div>` : ""}<div class="task-contact-view"><small>НАЗНАЧЕННЫЕ КОНТАКТЫ</small>${contacts.length ? contacts.map(contact => `<article class="task-contact-card"><div class="task-contact-copy"><span class="task-contact-role">${esc(contact.role || "Контакт")}</span><b>${esc(contact.name || "Без имени")}</b>${contact.phone ? `<a class="task-contact-number" href="tel:${esc(contact.phone)}">${esc(contact.phone)}</a>` : ""}</div><div class="task-contact-messengers">${messengerBadges(contact)}</div></article>`).join("") : `<p>Контакты не назначены</p>`}</div><div class="task-time-view"><small>ВЫПОЛНЕНИЕ</small><b>${esc(timeText)}</b><span>${task.notify ? `<i class="task-bell-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 18h7"/><path d="M10 21h4"/><path d="M6.7 16.5h10.6c-.8-.9-1.3-2.1-1.3-3.6V11a4.7 4.7 0 1 0-9.4 0v1.9c0 1.5-.5 2.7-1.3 3.6Z"/></svg></i>Напомнить за ${esc(task.reminder || "15")} мин.` : "Уведомление выключено"}</span></div><div class="task-expanded-actions"><button type="button" data-task-action="edit" aria-label="Редактировать задачу">${icon("edit")}</button></div></div>` : ""}
+    ${expanded ? `<div class="stage-task-expanded">${task.note ? `<div class="task-note"><small>ЗАМЕТКА</small><p>${esc(String(task.note).slice(0,400))}</p></div>` : ""}<div class="task-contact-view"><small>НАЗНАЧЕННЫЕ КОНТАКТЫ</small>${contacts.length ? contacts.map(contact => `<article class="task-contact-card"><div class="task-contact-copy"><span class="task-contact-role">${esc(contact.role || "Контакт")}</span><b>${esc(contact.name || "Без имени")}</b>${contact.phone ? `<a class="task-contact-number" href="tel:${esc(contact.phone)}">${esc(contact.phone)}</a>` : ""}</div><div class="task-contact-messengers">${messengerBadges(contact)}</div></article>`).join("") : `<p>Контакты не назначены</p>`}</div><div class="task-time-view"><small>ВЫПОЛНЕНИЕ</small><b>${esc(timeText)}</b><span>${task.notify ? `<i class="task-bell-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 18h7"/><path d="M10 21h4"/><path d="M6.7 16.5h10.6c-.8-.9-1.3-2.1-1.3-3.6V11a4.7 4.7 0 1 0-9.4 0v1.9c0 1.5-.5 2.7-1.3 3.6Z"/></svg></i>Напомнить за ${esc(task.reminder || "15")} мин.` : "Уведомление выключено"}</span></div><div class="task-expanded-actions"><button type="button" class="task-archive-action" data-task-action="archive" aria-label="Отправить задачу в общий архив" title="Дважды нажмите, чтобы архивировать">${icon("archiveSend")}</button><button type="button" data-task-action="edit" aria-label="Редактировать задачу">${icon("edit")}</button></div></div>` : ""}
   </article>`;
 }
 
@@ -1203,6 +1213,7 @@ function handleDetailClick(event) {
   if (action === "editNode") openEditor(node);
   if (action === "editBudget") openBudgetEditor(node);
   if (action === "phonebook") return;
+  if (action === "taskArchive" && node.type === "process") { openTaskArchive(node); return; }
   if (action === "coverMenu" && node.type === "process") openCoverQuickMenu(node);
   if (action === "addStage" && node.type === "process") {
     node.stages ||= [];
@@ -1226,12 +1237,22 @@ function handleStageTaskAction(node, button) {
   if(action==="priority"){task.priority=task.priority==="low"?"medium":task.priority==="medium"?"high":"low";saveData();renderDetailBody(node);return;}
   if(action==="menu"){card.querySelector(".task-context-menu")?.classList.toggle("hidden");return;}
   if(action==="edit") return openTaskEditor(node,task);
+  if(action==="archive"){const now=performance.now();if(state.taskArchiveTap.id===task.id&&now-state.taskArchiveTap.time<1800){state.taskArchiveTap={id:null,time:0};openTaskArchiveConfirm(node,task);}else{state.taskArchiveTap={id:task.id,time:now};button.classList.add("armed");setTimeout(()=>button.classList.remove("armed"),1800);toast("Нажмите ещё раз, чтобы отправить задачу в архив");}return;}
   if(action==="delete"){if(confirm(`Удалить задачу «${task.title}»?`)){node.tasks=tasks.filter(item=>item.id!==task.id);if(state.expandedProcessTaskId===task.id)state.expandedProcessTaskId=null;updateProcessProgress(node);saveData();renderDetailBody(node);render();}return;}
   const sameStage=tasks.filter(item=>item.stageId===task.stageId); const localIndex=sameStage.findIndex(item=>item.id===task.id); const target=action==="moveUp"?sameStage[localIndex-1]:sameStage[localIndex+1]; if(!target)return;
   const a=tasks.indexOf(task),b=tasks.indexOf(target); [tasks[a],tasks[b]]=[tasks[b],tasks[a]]; saveData();renderDetailBody(node);
 }
+function openTaskArchiveConfirm(node,task){state.taskArchivePending={nodeId:node.id,taskId:task.id};$("#taskArchiveConfirmText").textContent=`Вы точно хотите отправить задачу «${task.title||"Без названия"}» в общий архив?`;const d=$("#taskArchiveConfirmDialog");if(!d.open)d.showModal();}
+function closeTaskArchiveConfirm(){const d=$("#taskArchiveConfirmDialog");if(d?.open)d.close();state.taskArchivePending=null;}
+function confirmArchiveTask(){const p=state.taskArchivePending,node=nodeById(p?.nodeId),task=(node?.tasks||[]).find(x=>x.id===p?.taskId);if(!node||!task)return closeTaskArchiveConfirm();const stage=(node.stages||[]).find(x=>x.id===task.stageId);task.archived=true;task.archivedAt=new Date().toISOString();task.archivedStageId=task.stageId||"";task.archivedStageTitle=stage?.title||"Без этапа";if(state.expandedProcessTaskId===task.id)state.expandedProcessTaskId=null;updateProcessProgress(node);saveData();closeTaskArchiveConfirm();renderDetailBody(node);render();toast("Задача отправлена в общий архив");}
+function taskArchiveGroups(node){const archived=(node.tasks||[]).filter(t=>t.archived),order=new Map((node.stages||[]).map((s,i)=>[s.id,i])),groups=new Map();archived.forEach(task=>{const id=task.archivedStageId||task.stageId||"none",title=task.archivedStageTitle||(node.stages||[]).find(s=>s.id===id)?.title||"Без этапа";if(!groups.has(id))groups.set(id,{id,title,tasks:[]});groups.get(id).tasks.push(task)});return[...groups.values()].sort((a,b)=>(order.get(a.id)??999)-(order.get(b.id)??999));}
+function taskArchiveHtml(node){const groups=taskArchiveGroups(node);if(!groups.length)return`<div class="task-archive-empty">Архив задач пока пуст.</div>`;return groups.map(group=>`<section class="task-archive-group"><header><div><small>ЭТАП</small><h3>${esc(group.title)}</h3></div><span>${group.tasks.length}</span></header><div class="task-archive-list">${group.tasks.sort((a,b)=>String(b.archivedAt||"").localeCompare(String(a.archivedAt||""))).map(task=>{const expanded=state.taskArchiveExpandedId===task.id;return`<article class="task-archive-item ${expanded?"expanded":""}" data-archive-task-id="${esc(task.id)}"><button type="button" class="task-archive-item-main" data-archive-action="toggle"><div><b>${esc(task.title||"Задача без названия")}</b><small>${esc(priorityLabel(task.priority))}${task.archivedAt?` · ${esc(new Intl.DateTimeFormat("ru-RU",{day:"2-digit",month:"short",year:"numeric"}).format(new Date(task.archivedAt)))}`:""}</small></div>${icon("open")}</button>${expanded?`<div class="task-archive-item-detail">${task.note?`<p>${esc(String(task.note).slice(0,400))}</p>`:""}<div class="task-archive-item-actions"><button type="button" class="ghost" data-archive-action="restore">${icon("restore")}<span>Восстановить</span></button><button type="button" class="ghost danger-text" data-archive-action="delete">${icon("trash")}<span>Удалить навсегда</span></button></div></div>`:""}</article>`}).join("")}</div></section>`).join("")}
+function openTaskArchive(node){state.taskArchiveExpandedId=null;$("#taskArchiveBody").innerHTML=taskArchiveHtml(node);const d=$("#taskArchiveDialog");if(!d.open)d.showModal();}
+function closeTaskArchive(){const d=$("#taskArchiveDialog");if(d?.open)d.close();state.taskArchiveExpandedId=null;}
+function handleTaskArchiveClick(event){const item=event.target.closest("[data-archive-task-id]"),button=event.target.closest("[data-archive-action]");if(!item||!button)return;const node=nodeById(state.activeNodeId),task=(node?.tasks||[]).find(x=>x.id===item.dataset.archiveTaskId);if(!node||!task)return;const action=button.dataset.archiveAction;if(action==="toggle"){state.taskArchiveExpandedId=state.taskArchiveExpandedId===task.id?null:task.id;$("#taskArchiveBody").innerHTML=taskArchiveHtml(node);return}if(action==="restore"){task.archived=false;task.archivedAt="";task.stageId=task.archivedStageId||task.stageId;task.archivedStageId="";task.archivedStageTitle="";state.taskArchiveExpandedId=null;updateProcessProgress(node);saveData();$("#taskArchiveBody").innerHTML=taskArchiveHtml(node);renderDetailBody(node);render();toast("Задача восстановлена");return}if(action==="delete"&&confirm(`Удалить задачу «${task.title||"Без названия"}» навсегда?`)){node.tasks=(node.tasks||[]).filter(x=>x.id!==task.id);state.taskArchiveExpandedId=null;updateProcessProgress(node);saveData();$("#taskArchiveBody").innerHTML=taskArchiveHtml(node);renderDetailBody(node);render();toast("Задача удалена навсегда")}}
+
 function openTaskEditor(node, task) {
-  const base=task?clone(task):{id:uid(),stageId:state.selectedProcessStageId,title:"Новая задача",priority:"medium",note:"",contactIds:[],scheduleMode:"date",intervalStart:"",intervalEnd:"",dateTime:"",reminder:"15",notify:false,done:false};
+  const base=task?clone(task):{id:uid(),stageId:state.selectedProcessStageId,title:"Новая задача",priority:"medium",note:"",contactIds:[],scheduleMode:"date",intervalStart:"",intervalEnd:"",dateTime:"",reminder:"15",notify:false,done:false,archived:false,archivedAt:"",archivedStageId:"",archivedStageTitle:""};
   state.taskDraft=base;
   $("#taskEditorTitle").textContent=task?"Редактировать задачу":"Новая задача";
   $("#taskTitle").value=base.title||""; $("#taskNote").value=String(base.note||"").slice(0,400); updateTaskNoteCounter(); $("#taskPriority").value=base.priority||"medium"; $("#taskScheduleMode").value=base.scheduleMode||"date"; $("#taskIntervalStart").value=base.intervalStart||""; $("#taskIntervalEnd").value=base.intervalEnd||""; $("#taskDateTime").value=base.dateTime||""; $("#taskReminder").value=base.reminder||"15"; $("#taskNotify").checked=Boolean(base.notify);
@@ -1341,7 +1362,7 @@ function runMessengerAction(kind){const action=state.messengerAction;if(!action)
 
 function updateProcessProgress(node) {
   if (node.type !== "process") return;
-  const tasks = node.tasks || [];
+  const tasks = (node.tasks || []).filter(task => !task.archived);
   node.progress = tasks.length ? Math.round(tasks.filter(task => task.done).length / tasks.length * 100) : Math.round((node.stages || []).reduce((sum, stage) => sum + Number(stage.progress || 0), 0) / Math.max(1, (node.stages || []).length));
   const project = nodeById(node.projectId); if (project) project.progress = node.progress;
 }
@@ -1754,7 +1775,7 @@ function openPanel(panel) {
 function todayPanelHtml() {
   const today = todayISO(); const entries = [];
   state.data.nodes.filter(node => node.space === state.space && !node.archived).forEach(node => {
-    if (node.type === "process") (node.tasks || []).filter(task => !task.done && task.due === today).forEach(task => entries.push({ node, task }));
+    if (node.type === "process") (node.tasks || []).filter(task => !task.archived && !task.done && task.due === today).forEach(task => entries.push({ node, task }));
     if (node.type === "goal" && node.deadline === today) entries.push({ node, task: { title: node.title, due: today } });
     if (node.type === "project" && node.deadline === today) entries.push({ node, task: { title: `Срок проекта: ${node.title}`, due: today } });
   });
@@ -1764,7 +1785,7 @@ function todayPanelHtml() {
 function resultsPanelHtml() {
   const entries = [];
   state.data.nodes.filter(node => node.space === state.space && !node.archived).forEach(node => {
-    if (node.type === "process") (node.tasks || []).filter(task => task.done).forEach(task => entries.push({ node, title: task.title, detail: "Задача выполнена" }));
+    if (node.type === "process") (node.tasks || []).filter(task => !task.archived && task.done).forEach(task => entries.push({ node, title: task.title, detail: "Задача выполнена" }));
     if (node.status === "done") entries.push({ node, title: node.title, detail: `${TYPE_LABELS[node.type]} завершён` });
   });
   if (!entries.length) return `<div class="panel-empty">Завершённые результаты появятся здесь.</div>`;
