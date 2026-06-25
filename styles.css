@@ -179,3 +179,33 @@ html[data-theme="light"] .cover-size-switch{background:#edf1f6;border-color:#d5d
 
 /* v6.0.6 process controls */
 .process-metrics-bar{display:grid;grid-template-columns:1.12fr 1.12fr 1.15fr .9fr 48px;gap:6px;align-items:stretch;margin-bottom:16px}.process-metric,.process-phonebook-button{min-width:0;border:1px solid var(--line);border-radius:15px;background:var(--surface2);padding:9px 8px;text-align:left}.process-metric small,.process-phonebook-button small{display:block;color:var(--muted);font-size:8px}.process-metric b{display:block;margin-top:5px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.budget-metric{color:var(--text)}.progress-metric i{display:block;height:3px;margin-top:7px;border-radius:5px;background:var(--line-soft);overflow:hidden}.progress-metric i span{display:block;height:100%;background:linear-gradient(90deg,var(--purple),var(--cyan))}.stacked-count{padding:0}.stacked-count>div{padding:7px 8px}.stacked-count>div+div{border-top:1px solid var(--line)}.stacked-count b{display:inline;margin-left:6px}.process-phonebook-button{display:grid;place-items:center;padding:5px;position:relative}.process-phonebook-button svg{width:22px;height:22px}.process-phonebook-button small{position:absolute;right:5px;top:4px}.process-action-lock{width:112px;padding:4px 6px}.process-lock-track{width:100%;height:28px}.process-action-lock.unlocked .process-lock-thumb{transform:none!important}.mini-editor-dialog{width:min(360px,calc(100vw - 28px));border:0;border-radius:22px;padding:0;background:var(--surface);color:var(--text)}.mini-editor-dialog::backdrop{background:#000a;backdrop-filter:blur(6px)}.mini-editor-dialog form{padding:16px}.mini-editor-dialog header{display:flex;align-items:center;justify-content:space-between;margin-bottom:15px}.mini-editor-dialog h3{margin:0}.mini-editor-dialog header button{width:36px;height:36px;border-radius:50%;background:var(--surface3);font-size:24px}.mini-editor-dialog .primary{width:100%}.phonebook-add{width:100%;margin-bottom:12px}.phonebook-list{display:grid;gap:8px}.phonebook-card{display:grid;grid-template-columns:1fr auto auto;gap:7px;align-items:center;padding:11px;border:1px solid var(--line);border-radius:16px;background:var(--surface2)}.phonebook-card b,.phonebook-card small,.phonebook-card a{display:block}.phonebook-card small{margin-top:3px;color:var(--muted);font-size:9px}.phonebook-card a{margin-top:5px;color:var(--cyan);font-size:10px;text-decoration:none}.phonebook-card button{min-height:34px;padding:0 9px;border-radius:10px;background:var(--surface3);font-size:9px}.phonebook-editor{margin-top:14px;padding:13px;border:1px solid var(--line);border-radius:18px;background:var(--surface2)}.phonebook-editor-actions{display:flex;justify-content:flex-end;gap:8px}.task-contact-picker{display:grid;gap:7px}.task-contact-choice{display:flex;gap:9px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:14px;background:var(--surface2)}.task-contact-choice input{width:18px;height:18px;accent-color:#716cff}.task-contact-choice span{min-width:0}.task-contact-choice b,.task-contact-choice small{display:block}.task-contact-choice small{margin-top:3px;color:var(--muted);font-size:9px}@media(max-width:520px){.process-metrics-bar{grid-template-columns:1fr 1fr 1fr .8fr 44px;gap:4px}.process-metric{padding:8px 5px}.process-metric b{font-size:11px}.process-action-lock{width:124px}.phonebook-card{grid-template-columns:1fr auto}.phonebook-card .danger-text{grid-column:2}}
+
+
+/* v6.0.7 precision fixes */
+.process-metrics-bar{grid-template-columns:1.08fr 1.08fr 1.1fr .82fr 38px;gap:4px;margin-bottom:13px}
+.process-metric,.process-phonebook-button{border-radius:13px;padding:7px 6px;min-height:70px}
+.process-metric small,.process-phonebook-button small{font-size:7px;line-height:1.1}
+.process-metric b{margin-top:4px;font-size:11px}
+.progress-metric i{margin-top:6px}
+.stacked-count>div{padding:5px 6px}
+.stacked-count b{margin-left:4px;font-size:10px}
+.process-phonebook-button{padding:3px;min-height:70px}
+.process-phonebook-button svg{width:16px;height:16px;stroke-width:1.55}
+.process-phonebook-button small{right:4px;top:3px}
+.budget-metric{touch-action:manipulation;user-select:none;-webkit-user-select:none}
+.delicate-plus,.stage-task-add,.inline-add>button{width:30px!important;height:30px!important;min-height:30px!important;padding:0!important;border-radius:10px!important;background:var(--surface3)!important;border:1px solid var(--line)!important;color:var(--text)!important;font-size:18px!important;font-weight:400!important;box-shadow:none!important;display:grid!important;place-items:center!important}
+.process-detail-footer{gap:6px;padding-left:12px;padding-right:12px}
+.process-detail-footer #detailBranchButton,.process-detail-footer #detailEditButton{min-height:38px;padding:0 8px;font-size:11px;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:clip;border-radius:13px}
+.process-action-lock{width:136px;height:38px;padding:4px 5px;border-radius:13px}
+.process-lock-track{height:28px;width:100%}
+.process-lock-thumb{width:20px;height:20px;transition:transform .18s cubic-bezier(.2,.8,.2,1)}
+.process-action-lock.unlocked .process-lock-track{border-color:#6b86cf;background:#11182a}
+@media(max-width:390px){
+  .process-metrics-bar{grid-template-columns:1.05fr 1.05fr 1.05fr .78fr 36px;gap:3px}
+  .process-metric,.process-phonebook-button{padding:6px 4px;min-height:66px}
+  .process-metric b{font-size:10px}
+  .process-phonebook-button{min-height:66px}
+  .process-phonebook-button svg{width:15px;height:15px}
+  .process-detail-footer #detailBranchButton,.process-detail-footer #detailEditButton{font-size:10px;padding:0 6px}
+  .process-action-lock{width:128px}
+}

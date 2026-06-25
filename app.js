@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.6";
+const VERSION = "6.0.7";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -993,7 +993,7 @@ function processDetailHtml(node) {
       <div class="process-metric stacked-count"><div><small>ЭТАПЫ</small><b>${stages.length}</b></div><div><small>ЗАДАЧИ</small><b>${openTasks}</b></div></div>
       <button class="process-phonebook-button" data-detail-action="phonebook" aria-label="Телефонная книга">${icon("people")}<small>${(node.phonebook||[]).length}</small></button>
     </div>
-    <div class="detail-section"><div class="detail-section-head"><h3>Этапы</h3></div><div class="stage-list process-stage-selector">${stages.length ? stages.map(stage => stageSelectorHtml(stage)).join("") : `<div class="note-block">Этапы ещё не добавлены.</div>`}</div></div>
+    <div class="detail-section"><div class="detail-section-head"><h3>Этапы</h3><button class="delicate-plus" data-detail-action="addStage" aria-label="Создать новый этап">＋</button></div><div class="stage-list process-stage-selector">${stages.length ? stages.map(stage => stageSelectorHtml(stage)).join("") : `<div class="note-block">Этапы ещё не добавлены.</div>`}</div></div>
     ${selectedStageTasksHtml(node)}
     <div class="detail-section"><div class="detail-section-head"><h3>Затраты</h3><button data-detail-action="editNode">Таблица</button></div><div class="inline-add"><input id="detailExpenseTitle" placeholder="Описание"><input id="detailExpenseAmount" inputmode="decimal" placeholder="Сумма"><button data-detail-action="quickExpense">+</button></div><div class="expense-list" style="margin-top:9px">${expenseListHtml(node)}</div></div>`;
 }
@@ -1087,7 +1087,7 @@ function handleDetailClick(event) {
   if (assetButton) return openAssetViewer(nodeById(state.activeNodeId), Number(assetButton.dataset.assetIndex));
   const node = nodeById(state.activeNodeId); if (!node) return;
   const budgetButton = event.target.closest("[data-budget-edit]");
-  if (budgetButton && node.type === "process") { const now=performance.now(); if (state.lastBudgetTap && now-state.lastBudgetTap<340) { state.lastBudgetTap=0; openBudgetEditor(node); } else state.lastBudgetTap=now; return; }
+  if (budgetButton && node.type === "process") { const now=performance.now(); if (state.lastBudgetTap && now-state.lastBudgetTap<620) { state.lastBudgetTap=0; openBudgetEditor(node); } else state.lastBudgetTap=now; return; }
   const stageButton = event.target.closest("[data-stage-select]");
   if (stageButton && node.type === "process") {
     const stageId = stageButton.dataset.stageSelect; const now = performance.now();
@@ -1105,6 +1105,18 @@ function handleDetailClick(event) {
   if (action === "editNode") openEditor(node);
   if (action === "editBudget") openBudgetEditor(node);
   if (action === "phonebook") openPhonebook(node);
+  if (action === "addStage" && node.type === "process") {
+    node.stages ||= [];
+    const stage = { id: uid(), title: `Новый этап ${node.stages.length + 1}`, deadline: "", progress: 0 };
+    node.stages.push(stage);
+    state.selectedProcessStageId = stage.id;
+    state.expandedProcessTaskId = null;
+    updateProcessProgress(node);
+    saveData();
+    renderDetailBody(node);
+    render();
+    toast("Новый этап создан");
+  }
   if (action === "quickExpense") { const title=$("#detailExpenseTitle")?.value.trim(); const amount=Number(String($("#detailExpenseAmount")?.value||"").replace(",",".")); if(!title||!amount)return toast("Введите описание и сумму"); node.expenses||=[];node.expenses.push({id:uid(),title,amount,date:todayISO()});saveData();renderDetailBody(node);render();toast("Добавлено в затраты"); }
 }
 function handleStageTaskAction(node, button) {
@@ -1314,18 +1326,62 @@ function bindProcessCoverPositioning() {
   });
   const end=()=>{drag=null}; frame.addEventListener("pointerup",end); frame.addEventListener("pointercancel",end);
 }
+function positionProcessLockThumb(unlocked) {
+  const control = $("#processActionLock");
+  const track = $(".process-lock-track", control);
+  const thumb = $(".process-lock-thumb", control);
+  if (!track || !thumb) return;
+  const max = Math.max(0, track.clientWidth - thumb.offsetWidth - 4);
+  thumb.style.transform = `translateX(${unlocked ? max : 0}px)`;
+}
 function updateProcessActionLock(node) {
-  const isProcess = node?.type === "process"; $("#detailFooter").classList.toggle("process-detail-footer", isProcess); $("#processActionLock").classList.toggle("hidden", !isProcess);
-  $("#detailBranchButton").disabled = isProcess && !state.processActionsUnlocked; $("#detailEditButton").disabled = isProcess && !state.processActionsUnlocked; $("#processActionLock").classList.toggle("unlocked", isProcess && state.processActionsUnlocked);
-  const thumb=$(".process-lock-thumb", $("#processActionLock")); if (thumb && !state.processActionsUnlocked) thumb.style.transform="translateX(0)";
+  const isProcess = node?.type === "process";
+  $("#detailFooter").classList.toggle("process-detail-footer", isProcess);
+  $("#processActionLock").classList.toggle("hidden", !isProcess);
+  $("#detailBranchButton").disabled = isProcess && !state.processActionsUnlocked;
+  $("#detailEditButton").disabled = isProcess && !state.processActionsUnlocked;
+  $("#processActionLock").classList.toggle("unlocked", isProcess && state.processActionsUnlocked);
+  requestAnimationFrame(() => positionProcessLockThumb(isProcess && state.processActionsUnlocked));
 }
 function bindProcessActionLock() {
-  const control=$("#processActionLock"), track=$(".process-lock-track",control), thumb=$(".process-lock-thumb",control); let drag=null;
-  const setPos=r=>{const max=Math.max(0,track.clientWidth-thumb.offsetWidth-4);thumb.style.transform=`translateX(${clamp(r,0,1)*max}px)`};
-  control.addEventListener("pointerdown",e=>{if(state.processActionsUnlocked)return; const rect=track.getBoundingClientRect(); drag={left:rect.left,width:Math.max(1,rect.width-20)}; control.setPointerCapture?.(e.pointerId); setPos((e.clientX-drag.left)/drag.width)});
-  control.addEventListener("pointermove",e=>{if(drag)setPos((e.clientX-drag.left)/drag.width)});
-  control.addEventListener("pointerup",e=>{if(!drag)return; const ratio=(e.clientX-drag.left)/drag.width; drag=null; if(ratio>=.78){state.processActionsUnlocked=true;navigator.vibrate?.(16);updateProcessActionLock(nodeById(state.activeNodeId))}else setPos(0)});
-  control.addEventListener("pointercancel",()=>{drag=null;setPos(0)});
+  const control = $("#processActionLock");
+  const track = $(".process-lock-track", control);
+  const thumb = $(".process-lock-thumb", control);
+  let drag = null;
+  const setPos = ratio => {
+    const max = Math.max(0, track.clientWidth - thumb.offsetWidth - 4);
+    const normalized = clamp(ratio, 0, 1);
+    thumb.style.transform = `translateX(${normalized * max}px)`;
+    if (drag) drag.ratio = normalized;
+  };
+  control.addEventListener("pointerdown", event => {
+    if (state.processActionsUnlocked) return;
+    event.preventDefault();
+    const rect = track.getBoundingClientRect();
+    drag = { left: rect.left, travel: Math.max(1, rect.width - thumb.offsetWidth - 4), ratio: 0 };
+    control.setPointerCapture?.(event.pointerId);
+    setPos((event.clientX - rect.left - thumb.offsetWidth / 2) / drag.travel);
+  });
+  control.addEventListener("pointermove", event => {
+    if (!drag) return;
+    event.preventDefault();
+    setPos((event.clientX - drag.left - thumb.offsetWidth / 2) / drag.travel);
+  });
+  const finish = event => {
+    if (!drag) return;
+    event?.preventDefault?.();
+    const ratio = drag.ratio;
+    drag = null;
+    if (ratio >= .82) {
+      state.processActionsUnlocked = true;
+      navigator.vibrate?.(16);
+      updateProcessActionLock(nodeById(state.activeNodeId));
+    } else {
+      positionProcessLockThumb(false);
+    }
+  };
+  control.addEventListener("pointerup", finish);
+  control.addEventListener("pointercancel", () => { drag = null; positionProcessLockThumb(false); });
 }
 
 function syncDraftDynamicFields() {
