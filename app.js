@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.9";
+const VERSION = "6.0.10";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -1011,7 +1011,7 @@ function processDetailHtml(node) {
       <div class="process-metric"><small>РАСХОДЫ</small><b>${money(total)}</b></div>
       <div class="process-metric count-metric"><small>ЭТАПЫ</small><b>${stages.length}</b></div>
       <div class="process-metric count-metric"><small>ЗАДАЧИ</small><b>${openTasks}</b></div>
-      <button class="process-phonebook-button" data-detail-action="phonebook" aria-label="Телефонная книга">${icon("people")}<small>${(node.phonebook||[]).length}</small></button>
+      <button type="button" class="process-phonebook-button interactive-metric" data-detail-action="phonebook" aria-label="Роли. Открыть телефонную книгу"><small>РОЛИ</small><b>${(node.phonebook||[]).length}</b></button>
     </div>
     <div class="process-progress-row"><div><small>ПРОГРЕСС</small><b>${node.progress || 0}%</b></div><i><span style="width:${clamp(node.progress||0,0,100)}%"></span></i></div>
     <div class="detail-section"><div class="detail-section-head"><h3>Этапы</h3><button class="delicate-plus" data-detail-action="addStage" aria-label="Создать новый этап">＋</button></div><div class="stage-list process-stage-selector">${stages.length ? stages.map(stage => stageSelectorHtml(stage)).join("") : `<div class="note-block">Этапы ещё не добавлены.</div>`}</div></div>
