@@ -165,3 +165,10 @@ html[data-theme="light"] .asset-viewer{background:#f5f7fb;color:#171a22}html[dat
 .cover-position-controls{grid-template-columns:minmax(110px,1fr) auto auto;gap:7px;margin-top:10px;align-items:end;flex:0 0 auto}.cover-position-controls .ghost,.cover-position-controls .primary{min-height:40px;padding:0 13px}
 html[data-theme="light"] .cover-size-switch{background:#edf1f6;border-color:#d5dce7}html[data-theme="light"] .cover-size-switch button.active{background:#fff;color:#202634;box-shadow:inset 0 0 0 1px #cbd4e1}
 @media(max-width:390px){.cover-position-dialog{width:calc(100vw - 16px);max-width:calc(100vw - 16px)}.cover-position-shell{padding:12px 12px calc(12px + var(--safe-bottom))}.cover-position-shell h2{font-size:16px}.cover-size-switch button{height:39px;gap:4px}.cover-size-switch small{font-size:7.5px}.cover-position-frame{max-height:38dvh}.cover-position-controls{grid-template-columns:1fr 1fr}.cover-position-controls label{grid-column:1/-1}.cover-position-controls .ghost,.cover-position-controls .primary{width:100%;padding:0 10px}}
+
+/* v6.0.4 — process cover controls only */
+.process-cover-buttons{width:100%;align-items:stretch}
+.process-cover-buttons .ghost{width:100%;min-height:36px;padding:0 12px;text-align:center;white-space:nowrap}
+.process-cover-buttons .ghost:disabled{opacity:.42;pointer-events:none}
+.process-cover-thumb img,.process-cover-media,.cover-position-frame img{object-fit:cover;object-position:50% 50%;transform-origin:center center}
+.cover-position-frame img{inset:0;width:100%;height:100%}

@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.3";
+const VERSION = "6.0.4";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -928,10 +928,16 @@ function normalizedProcessCoverPositions(source) {
 function processCoverPosition(node, mode = "2") {
   return normalizedProcessCoverPositions(node)[String(mode)] || { x: 0, y: 0, scale: 1 };
 }
+function processCoverStyle(position) {
+  const x = clamp(50 + Number(position?.x || 0), 0, 100);
+  const y = clamp(50 + Number(position?.y || 0), 0, 100);
+  const scale = Math.max(1, Number(position?.scale || 1));
+  return `object-position:${x}% ${y}%;transform:scale(${scale})`;
+}
 function processCoverMediaHtml(node) {
   if (!node.coverAssetId) return "";
   const position = processCoverPosition(node, "2");
-  return `<img class="process-cover-media" data-process-cover="${esc(node.coverAssetId)}" style="transform:translate(${Number(position.x || 0)}%,${Number(position.y || 0)}%) scale(${Number(position.scale || 1)})" alt="">`;
+  return `<img class="process-cover-media" data-process-cover="${esc(node.coverAssetId)}" style="${processCoverStyle(position)}" alt="">`;
 }
 function processDetailHtml(node) {
   const project = nodeById(node.projectId);
@@ -1059,7 +1065,7 @@ function commonFields(draft) {
 function processCoverEditorHtml(draft) {
   const hasCover = Boolean(draft.coverAssetId);
   const position = processCoverPosition(draft, "2");
-  return `<div class="field process-cover-field"><label>Обложка</label><div class="process-cover-editor">${hasCover ? `<div class="process-cover-thumb"><img data-editor-process-cover="${esc(draft.coverAssetId)}" style="transform:translate(${Number(position.x || 0)}%,${Number(position.y || 0)}%) scale(${Number(position.scale || 1)})" alt=""></div>` : `<div class="process-cover-empty">Обложка не добавлена</div>`}<div class="process-cover-buttons"><button type="button" class="ghost" data-editor-action="addProcessCover">${hasCover ? "Изменить обложку" : "Добавить обложку"}</button>${hasCover ? `<button type="button" class="danger-text process-cover-remove" data-editor-action="removeProcessCover">Удалить обложку</button>` : ""}</div></div></div>`;
+  return `<div class="field process-cover-field"><label>Обложка</label><div class="process-cover-editor">${hasCover ? `<div class="process-cover-thumb"><img data-editor-process-cover="${esc(draft.coverAssetId)}" style="${processCoverStyle(position)}" alt=""></div>` : `<div class="process-cover-empty">Обложка не добавлена</div>`}<div class="process-cover-buttons"><button type="button" class="ghost" data-editor-action="newProcessCover">Новая обложка</button><button type="button" class="ghost" data-editor-action="positionProcessCover" ${hasCover ? "" : "disabled"}>Настроить существующую</button></div></div></div>`;
 }
 function statusOptions(value) {
   return Object.entries(STATUS_LABELS).map(([key, label]) => `<option value="${key}" ${value === key ? "selected" : ""}>${label}</option>`).join("");
@@ -1104,8 +1110,8 @@ function bindEditorDynamicActions() {
   $("#editorBody").onclick = event => {
     const action = event.target.closest("[data-editor-action]")?.dataset.editorAction;
     if (action === "addAssets") { state.assetTargetNodeId = state.activeNodeId; $("#assetInput").click(); }
-    if (action === "addProcessCover") $("#processCoverInput").click();
-    if (action === "removeProcessCover") removeProcessCoverFromDraft();
+    if (action === "newProcessCover") $("#processCoverInput").click();
+    if (action === "positionProcessCover" && state.editDraft?.coverAssetId) openProcessCoverPositionDialog(state.editDraft.coverAssetId);
     if (action === "addStage") { state.editDraft.stages ||= []; state.editDraft.stages.push({ id: uid(), title: "Новый этап", progress: 0, deadline: "" }); renderEditorBody(); }
     if (action === "addTask") { state.editDraft.tasks ||= []; state.editDraft.tasks.push({ id: uid(), title: "Новая задача", due: "", done: false, personId: "" }); renderEditorBody(); }
     if (action === "addExpense") { state.editDraft.expenses ||= []; state.editDraft.expenses.push({ id: uid(), title: "Новая затрата", amount: "", date: todayISO() }); renderEditorBody(); }
@@ -1128,8 +1134,21 @@ function removeProcessCoverFromDraft() {
 async function handleProcessCoverFile(event) {
   const file = event.target.files?.[0]; event.target.value = "";
   if (!file || !state.editDraft || state.editDraft.type !== "process") return;
-  const id = uid(); const metadata = { id, name: file.name, type: file.type || "image/jpeg", size: file.size, createdAt: Date.now() };
-  await putAsset({ ...metadata, blob: file }); state.editDraft.assets ||= []; state.editDraft.assets.push(metadata); state.editDraft.coverAssetId = id; state.editDraft.coverPosition = { x: 0, y: 0, scale: 1 }; state.editDraft.coverPositions = normalizedProcessCoverPositions({}); openProcessCoverPositionDialog(id);
+  const previousId = state.editDraft.coverAssetId;
+  const id = uid();
+  const metadata = { id, name: file.name, type: file.type || "image/jpeg", size: file.size, createdAt: Date.now() };
+  await putAsset({ ...metadata, blob: file });
+  state.editDraft.assets ||= [];
+  if (previousId) {
+    state.editDraft.assets = state.editDraft.assets.filter(asset => asset.id !== previousId);
+    releaseObjectUrl(previousId);
+    await deleteAssetRecord(previousId).catch(() => {});
+  }
+  state.editDraft.assets.push(metadata);
+  state.editDraft.coverAssetId = id;
+  state.editDraft.coverPosition = { x: 0, y: 0, scale: 1 };
+  state.editDraft.coverPositions = normalizedProcessCoverPositions({});
+  renderEditorBody();
 }
 async function openProcessCoverPositionDialog(assetId) {
   const url = await assetUrl(assetId).catch(() => null); if (!url) return;
@@ -1154,8 +1173,10 @@ function setProcessCoverMode(mode) {
 }
 function updateProcessCoverPreview() {
   const position = currentProcessCoverPosition(); if (!position) return;
-  position.scale = Number($("#processCoverScale").value || 1);
-  $("#processCoverPreview").style.transform = `translate(${position.x || 0}%,${position.y || 0}%) scale(${position.scale})`;
+  position.scale = Math.max(1, Number($("#processCoverScale").value || 1));
+  const preview = $("#processCoverPreview");
+  preview.style.objectPosition = `${clamp(50 + Number(position.x || 0), 0, 100)}% ${clamp(50 + Number(position.y || 0), 0, 100)}%`;
+  preview.style.transform = `scale(${position.scale})`;
 }
 function resetProcessCoverPosition() {
   if (!state.coverPositionDraft) return;
