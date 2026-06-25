@@ -1,6 +1,7 @@
 "use strict";
 
-const VERSION = "6.0.0";
+const VERSION = "6.0.1";
+const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
 const DATA_PREFIX = "boonwave_v6_data_";
@@ -63,7 +64,9 @@ function icon(name, className = "") {
     link: `<path d="M9.5 14.5 8 16a3 3 0 0 1-4-4l3-3a3 3 0 0 1 4 0M14.5 9.5 16 8a3 3 0 1 1 4 4l-3 3a3 3 0 0 1-4 0M9 12h6"/>`,
     restore: `<path d="M4 8v5h5"/><path d="M5.5 13a7 7 0 1 0 2-6"/>`,
     phone: `<path d="M7 3h3l1.2 4-2 1.6a15 15 0 0 0 6.2 6.2l1.6-2L21 14v3c0 2-1 3-3 3C10.3 20 4 13.7 4 6c0-2 1-3 3-3Z"/>`,
-    mail: `<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/>`
+    mail: `<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/>`,
+    sun: `<circle cx="12" cy="12" r="3.5"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/>`,
+    moon: `<path d="M20.5 14.2A8 8 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z"/>`
   };
   return `<svg ${common}>${paths[name] || paths.open}</svg>`;
 }
@@ -269,6 +272,39 @@ function releaseObjectUrl(assetId) {
   state.objectUrls.delete(assetId);
 }
 
+/* Theme */
+function getTheme() { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; }
+function applyTheme(theme, persist = true) {
+  const value = theme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = value;
+  document.documentElement.style.colorScheme = value;
+  if (persist) localStorage.setItem(THEME_KEY, value);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", value === "light" ? "#f5f7fb" : "#06070c");
+  const status = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+  if (status) status.setAttribute("content", value === "light" ? "default" : "black-translucent");
+  updateThemeControl();
+  requestAnimationFrame(drawDots);
+}
+function updateThemeControl() {
+  const isLight = document.documentElement.dataset.theme === "light";
+  const row = document.querySelector('[data-menu-action="theme"]');
+  if (!row) return;
+  const iconSlot = row.querySelector('[data-icon]');
+  if (iconSlot) { iconSlot.dataset.icon = isLight ? "moon" : "sun"; iconSlot.innerHTML = icon(isLight ? "moon" : "sun"); }
+  const title = document.getElementById("themeMenuTitle");
+  const hint = document.getElementById("themeMenuHint");
+  if (title) title.textContent = isLight ? "Тёмная тема" : "Светлая тема";
+  if (hint) hint.textContent = isLight ? "Переключить на тёмное оформление" : "Переключить на светлое оформление";
+  row.classList.toggle("is-light", isLight);
+}
+function toggleTheme() {
+  applyTheme(getTheme() === "light" ? "dark" : "light");
+  navigator.vibrate?.(10);
+  toast(document.documentElement.dataset.theme === "light" ? "Светлая тема включена" : "Тёмная тема включена");
+}
+applyTheme(getTheme(), false);
+
 /* Onboarding */
 function accounts() {
   try { return JSON.parse(localStorage.getItem(ACCOUNTS_KEY)) || []; } catch { return []; }
@@ -282,6 +318,7 @@ function clearSession() { localStorage.removeItem(SESSION_KEY); }
 
 function initializeOnboarding() {
   hydrateStaticIcons();
+  updateThemeControl();
   const debugDemo = new URLSearchParams(location.search).get("demo") === "1";
   const existing = session();
   const delay = debugDemo ? 10 : 1900;
@@ -582,7 +619,9 @@ function drawDots() {
       const world = screenToWorld(x, y);
       const pulse = Math.sin((world.x + world.y) * .012) * .025;
       const alpha = .09 + pulse + Math.max(0, state.camera.scale - .8) * .025;
-      ctx.beginPath(); ctx.fillStyle = ((x + y) / spacing) % 2 > 1 ? `rgba(86,217,235,${alpha})` : `rgba(119,94,255,${alpha})`;
+      const light = document.documentElement.dataset.theme === "light";
+      const dotAlpha = light ? Math.min(.16, alpha + .015) : alpha;
+      ctx.beginPath(); ctx.fillStyle = ((x + y) / spacing) % 2 > 1 ? `rgba(50,164,190,${dotAlpha})` : `rgba(91,76,196,${dotAlpha})`;
       ctx.arc(x, y, 1.05, 0, Math.PI * 2); ctx.fill();
     }
   }
@@ -1188,6 +1227,7 @@ function handleMenuAction(event) {
   const action = button.dataset.menuAction;
   if (action === "export") exportData();
   if (action === "import") $("#importInput").click();
+  if (action === "theme") { toggleTheme(); return; }
   if (action === "fit") { closeOverlays(); fitAll(true); }
   if (action === "logout") logout();
   if (action === "reset") resetAll();

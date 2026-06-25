@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
-  <meta name="theme-color" content="#06070c">
+  <meta name="theme-color" content="#06070c" id="themeColorMeta">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="BOONWAVE">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=6.0.0">
+  <link rel="stylesheet" href="styles.css?v=6.0.1">
   <title>BOONWAVE</title>
 </head>
 <body>
@@ -108,10 +108,11 @@
     <header><div><small>BOONWAVE</small><b id="accountLabel">Локальный аккаунт</b></div><button data-close-sheet="accountMenu">×</button></header>
     <button class="menu-row" data-menu-action="export"><span data-icon="export"></span><div><b>Экспорт</b><small>Сохранить резервную копию JSON</small></div></button>
     <button class="menu-row" data-menu-action="import"><span data-icon="import"></span><div><b>Импорт</b><small>Восстановить структуру из файла</small></div></button>
+    <button class="menu-row theme-menu-row" data-menu-action="theme"><span data-icon="sun"></span><div><b id="themeMenuTitle">Светлая тема</b><small id="themeMenuHint">Переключить оформление интерфейса</small></div><i class="theme-switch" aria-hidden="true"><i></i></i></button>
     <button class="menu-row" data-menu-action="fit"><span data-icon="focus"></span><div><b>Вписать всё</b><small>Вернуть все карточки в обзор</small></div></button>
     <button class="menu-row" data-menu-action="logout"><span data-icon="logout"></span><div><b>Выйти</b><small>Проекты останутся на устройстве</small></div></button>
     <button class="menu-row danger" data-menu-action="reset"><span data-icon="trash"></span><div><b>Полный сброс</b><small>Удалить локальные данные и вложения</small></div></button>
-    <footer>BOONWAVE 6.0.0 · CLEAN WORKSPACE</footer>
+    <footer>BOONWAVE 6.0.1 · LIGHT THEME</footer>
   </section>
 
   <section id="sidePanel" class="side-panel hidden">
@@ -145,6 +146,6 @@
   <input id="importInput" type="file" accept="application/json,.json" hidden>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=6.0.0"></script>
+  <script src="app.js?v=6.0.1"></script>
 </body>
 </html>
