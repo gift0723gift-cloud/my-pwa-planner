@@ -1,12 +1,12 @@
 "use strict";
 
-const VERSION = "6.0.35";
+const VERSION = "6.0.36";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
 const DATA_PREFIX = "boonwave_v6_data_";
 const DATA_BACKUP_PREFIX = "boonwave_v6_backup_";
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const GUEST_ID = "visual-demo";
 const WORLD_W = 3600;
 const WORLD_H = 2600;
@@ -184,7 +184,7 @@ function demoData() {
       },
       {
         id: personId, type: "person", space: "work", x: 1830, y: 1290, level: 1,
-        title: "Антон", speciality: "3D-печать и прототипы", zone: "В работе",
+        title: "Антон", speciality: "3D-печать и прототипы", personStatus: "Работаем", personStatusMode: "Работаем",
         phone: "+7 900 000-00-00", email: "anton@example.com", social: "@anton.maker",
         tags: "3D-печать, прототипы, пластик", note: "Быстро собирает сложные тестовые узлы.",
         status: "active", assets: [], archived: false
@@ -244,6 +244,13 @@ function normalizeData(data) {
   const normalized = { ...base, ...data };
   normalized.nodes = Array.isArray(data.nodes) ? data.nodes.map(node => {
     const normalizedNode = { level: 2, assets: [], archived: false, locked: false, status: "active", ...node };
+    if (normalizedNode.type === "person") {
+      let legacyZone = String(normalizedNode.personStatus || normalizedNode.zone || "").trim();
+      if (legacyZone === "В работе") legacyZone = "Работаем";
+      const known = ["Неизвестно","Временно","Перспективный","Работаем"];
+      normalizedNode.personStatus = known.includes(legacyZone) ? legacyZone : (legacyZone ? legacyZone.slice(0,30) : "Неизвестно");
+      normalizedNode.personStatusMode = known.includes(normalizedNode.personStatus) ? normalizedNode.personStatus : "custom";
+    }
     if (Number(normalizedNode.level) === 3) normalizedNode.level = 2;
     if (normalizedNode.type === "process") {
       normalizedNode.stages = Array.isArray(normalizedNode.stages) ? normalizedNode.stages : [];
@@ -719,7 +726,7 @@ async function hydrateCardCovers() {
     if (url && visual.isConnected) {
       visual.style.backgroundImage = `url("${url}")`;
       const node = nodeById(visual.dataset.coverNode);
-      if (node?.type === "process") {
+      if (node?.type === "process" || node?.type === "person") {
         const position = processCoverPosition(node, String(node.level || 2));
         visual.style.backgroundPosition = `calc(50% + ${Number(position.x || 0)}%) calc(50% + ${Number(position.y || 0)}%)`;
         visual.style.backgroundSize = `${Math.max(100, Number(position.scale || 1) * 100)}%`;
@@ -765,11 +772,13 @@ function renderLinks() {
 
     if (link.flow && link.flow !== "none") {
       const addPulse = reverse => {
-        const pulse = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        pulse.setAttribute("d", pathData);
-        pulse.setAttribute("pathLength", "1000");
-        pulse.setAttribute("class", `link-flow-overlay ${reverse ? "reverse" : "forward"}`);
-        svg.appendChild(pulse);
+        ["tail","body","head"].forEach(layer => {
+          const pulse = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          pulse.setAttribute("d", pathData);
+          pulse.setAttribute("pathLength", "1000");
+          pulse.setAttribute("class", `link-flow-overlay ${layer} ${reverse ? "reverse" : "forward"}`);
+          svg.appendChild(pulse);
+        });
       };
       if (link.flow === "forward") addPulse(false);
       if (link.flow === "reverse") addPulse(true);
@@ -1133,25 +1142,32 @@ function cameraLimits(scale = state.camera.scale) {
 }
 function softenCameraBounds() {
   const l=cameraLimits();
-  state.camera.tx=clamp(state.camera.tx,l.minTx-90,l.maxTx+90);
-  state.camera.ty=clamp(state.camera.ty,l.minTy-110,l.maxTy+110);
+  state.camera.tx=clamp(state.camera.tx,l.minTx,l.maxTx);
+  state.camera.ty=clamp(state.camera.ty,l.minTy,l.maxTy);
 }
 function settleCameraBounds() {
-  const l=cameraLimits();
-  const tx=clamp(state.camera.tx,l.minTx,l.maxTx), ty=clamp(state.camera.ty,l.minTy,l.maxTy);
-  if (Math.abs(tx-state.camera.tx)<.5 && Math.abs(ty-state.camera.ty)<.5) return;
-  $("#world").style.transition="transform .32s cubic-bezier(.2,.78,.2,1)";
-  state.camera.tx=tx; state.camera.ty=ty; applyCamera();
-  setTimeout(()=>$("#world").style.transition="",340);
+  softenCameraBounds(); applyCamera();
 }
 function startCameraInertia(vx,vy) {
   cancelAnimationFrame(state.cameraInertiaFrame);
+  const maxSpeed=.34;
+  const speed=Math.hypot(vx,vy);
+  if(speed<.045){ settleCameraBounds(); return; }
+  if(speed>maxSpeed){ const k=maxSpeed/speed; vx*=k; vy*=k; }
   let last=performance.now();
   const step=now=>{
-    const dt=Math.min(32,now-last); last=now;
-    state.camera.tx+=vx*dt; state.camera.ty+=vy*dt; softenCameraBounds(); applyCamera();
-    const friction=Math.pow(.91,dt/16.7); vx*=friction; vy*=friction;
-    if(Math.hypot(vx,vy)<.015){ settleCameraBounds(); state.data.settings.cameras ||= {}; state.data.settings.cameras[state.space]=clone(state.camera); saveData(); return; }
+    const dt=Math.min(24,now-last); last=now;
+    const l=cameraLimits();
+    const nextTx=state.camera.tx+vx*dt, nextTy=state.camera.ty+vy*dt;
+    const clampedTx=clamp(nextTx,l.minTx,l.maxTx), clampedTy=clamp(nextTy,l.minTy,l.maxTy);
+    if(clampedTx!==nextTx) vx=0;
+    if(clampedTy!==nextTy) vy=0;
+    state.camera.tx=clampedTx; state.camera.ty=clampedTy; applyCamera();
+    const friction=Math.pow(.84,dt/16.7); vx*=friction; vy*=friction;
+    if(Math.hypot(vx,vy)<.018){
+      state.cameraInertiaFrame=0;
+      state.data.settings.cameras ||= {}; state.data.settings.cameras[state.space]=clone(state.camera); saveData(); return;
+    }
     state.cameraInertiaFrame=requestAnimationFrame(step);
   };
   state.cameraInertiaFrame=requestAnimationFrame(step);
@@ -1159,12 +1175,13 @@ function startCameraInertia(vx,vy) {
 
 /* Gestures */
 function onCanvasPointerDown(event) {
+  cancelAnimationFrame(state.cameraInertiaFrame); state.cameraInertiaFrame=0;
   if (event.target.closest(".node-card,.canvas-utility,.gesture-hint,.link-hit,.link-end-handle,.link-toolbar")) return;
   event.preventDefault();
   event.currentTarget.setPointerCapture?.(event.pointerId);
   state.canvasPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
   if (state.canvasPointers.size === 1) {
-    state.canvasGesture = { type: "pan", startX: event.clientX, startY: event.clientY, tx: state.camera.tx, ty: state.camera.ty, moved: false, time: performance.now(), lastX:event.clientX,lastY:event.clientY,lastT:performance.now(),vx:0,vy:0 };
+    state.canvasGesture = { type: "pan", startX: event.clientX, startY: event.clientY, tx: state.camera.tx, ty: state.camera.ty, moved: false, time: performance.now(), lastX:event.clientX,lastY:event.clientY,lastT:performance.now(),vx:0,vy:0,samples:[] };
   } else if (state.canvasPointers.size === 2) {
     const points = [...state.canvasPointers.values()];
     const center = midpoint(points[0], points[1]);
@@ -1180,7 +1197,11 @@ function onCanvasPointerMove(event) {
     const dx = event.clientX - gesture.startX, dy = event.clientY - gesture.startY;
     if (Math.hypot(dx, dy) > 4) { gesture.moved = true; $("#canvasViewport").classList.add("is-panning"); }
     const now=performance.now(), dt=Math.max(1,now-gesture.lastT);
-    gesture.vx=(event.clientX-gesture.lastX)/dt; gesture.vy=(event.clientY-gesture.lastY)/dt;
+    const sx=(event.clientX-gesture.lastX)/dt, sy=(event.clientY-gesture.lastY)/dt;
+    gesture.samples.push({vx:sx,vy:sy,t:now}); gesture.samples=gesture.samples.filter(sample=>now-sample.t<110).slice(-6);
+    const weight=gesture.samples.reduce((sum,_,i)=>sum+i+1,0)||1;
+    gesture.vx=gesture.samples.reduce((sum,s,i)=>sum+s.vx*(i+1),0)/weight;
+    gesture.vy=gesture.samples.reduce((sum,s,i)=>sum+s.vy*(i+1),0)/weight;
     gesture.lastX=event.clientX; gesture.lastY=event.clientY; gesture.lastT=now;
     state.camera.tx = gesture.tx + dx; state.camera.ty = gesture.ty + dy; softenCameraBounds(); applyCamera();
   } else if (state.canvasPointers.size >= 2) {
@@ -1211,7 +1232,7 @@ function onCanvasPointerEnd(event) {
     state.canvasGesture = null;
   } else if (state.canvasPointers.size === 1) {
     const point = [...state.canvasPointers.values()][0];
-    state.canvasGesture = { type: "pan", startX: point.x, startY: point.y, tx: state.camera.tx, ty: state.camera.ty, moved: false, time: performance.now(), lastX:point.x,lastY:point.y,lastT:performance.now(),vx:0,vy:0 };
+    state.canvasGesture = { type: "pan", startX: point.x, startY: point.y, tx: state.camera.tx, ty: state.camera.ty, moved: false, time: performance.now(), lastX:point.x,lastY:point.y,lastT:performance.now(),vx:0,vy:0,samples:[] };
   }
 }
 function distance(a, b) { return Math.hypot(b.x - a.x, b.y - a.y); }
@@ -1225,6 +1246,7 @@ function attachCardGestures(element, node) {
   const cancelLong = () => { if (longTimer) clearTimeout(longTimer); longTimer = null; element.classList.remove("longpress"); };
 
   element.addEventListener("pointerdown", event => {
+    cancelAnimationFrame(state.cameraInertiaFrame); state.cameraInertiaFrame=0;
     if (event.target.closest("button,input")) return;
     event.preventDefault(); event.stopPropagation(); element.setPointerCapture?.(event.pointerId);
     pointers.set(event.pointerId, { x: event.clientX, y: event.clientY, t: performance.now() });
@@ -1442,7 +1464,7 @@ function createNode(type, parent = null, openEditorNow = true, delayedEditor = f
   const defaults = {
     project: { title: "Новый проект", status: "preparation", progress: 0, client: "", address: "", budget: "", assets: [] },
     goal: { title: "Новая цель", status: "active", progress: 0, deadline: "", metric: "", assets: [] },
-    person: { title: "Новый человек", status: "active", speciality: "", zone: "Ближнее поле", tags: "", assets: [] },
+    person: { title: "Новый человек", status: "active", speciality: "", personStatus: "Неизвестно", personStatusMode: "Неизвестно", tags: "", assets: [] },
     idea: { title: "Новая идея", status: "active", source: "", tags: "", assets: [] }
   };
   pushUndo("Создание карточки");
@@ -1617,11 +1639,16 @@ function stageTaskHtml(node, task) {
   </article>`;
 }
 
+function personPhotoMediaHtml(node) {
+  if (!node.coverAssetId) return `<div class="person-photo-placeholder">${icon("person")}</div>`;
+  const position = processCoverPosition(node, "2");
+  return `<img class="person-photo-media" data-detail-cover="${esc(node.coverAssetId)}" style="${processCoverStyle(position)}" alt="">`;
+}
 function personDetailHtml(node) {
-  return `${heroHtml(node, node.speciality || "Специалист")}
-    <div class="detail-grid"><div class="detail-stat"><small>ЗОНА ВНИМАНИЯ</small><b>${esc(node.zone || "—")}</b></div><div class="detail-stat"><small>АКТИВНЫЕ ЗАДАЧИ</small><b>${tasksForPerson(node.id).filter(task => !task.done).length}</b></div></div>
+  return `<div class="detail-hero person-detail-hero">${personPhotoMediaHtml(node)}<div class="detail-hero-content"><p>${esc(node.speciality || "Специалист")}</p></div></div>
+    <div class="detail-grid"><div class="detail-stat"><small>СТАТУС</small><b>${esc(node.personStatus || "Неизвестно")}</b></div><div class="detail-stat"><small>АКТИВНЫЕ ЗАДАЧИ</small><b>${tasksForPerson(node.id).filter(task => !task.done).length}</b></div></div>
     <div class="detail-section"><div class="detail-section-head"><h3>Контакты</h3></div><div class="chips">${node.phone ? `<a class="chip" href="tel:${esc(node.phone)}">${icon("phone")} ${esc(node.phone)}</a>` : ""}${node.email ? `<a class="chip" href="mailto:${esc(node.email)}">${icon("mail")} ${esc(node.email)}</a>` : ""}${node.social ? `<span class="chip">${esc(node.social)}</span>` : ""}</div></div>
-    ${node.tags ? `<div class="detail-section"><div class="detail-section-head"><h3>Навыки и материалы</h3></div><div class="chips">${node.tags.split(",").filter(Boolean).map(tag => `<span class="chip">${esc(tag.trim())}</span>`).join("")}</div></div>` : ""}
+    ${node.tags ? `<div class="detail-section"><div class="detail-section-head"><h3>Ключевые слова</h3></div><div class="chips">${node.tags.split(",").filter(Boolean).map(tag => `<span class="chip">${esc(tag.trim())}</span>`).join("")}</div></div>` : ""}
     ${node.note ? `<div class="detail-section"><div class="detail-section-head"><h3>Заметка</h3></div><div class="note-block">${esc(node.note)}</div></div>` : ""}`;
 }
 function ideaDetailHtml(node) {
@@ -1671,7 +1698,7 @@ function taskListHtml(node) {
 function peopleListHtml(node) {
   const people = (node.peopleIds || []).map(nodeById).filter(Boolean);
   if (!people.length) return `<div class="note-block">Исполнители ещё не связаны.</div>`;
-  return people.map(person => `<div class="person-item"><div><b>${esc(person.title)}</b><small>${esc(person.speciality || "Специалист")}</small></div><span class="panel-chip">${esc(person.zone || "")}</span></div>`).join("");
+  return people.map(person => `<div class="person-item"><div><b>${esc(person.title)}</b><small>${esc(person.speciality || "Специалист")}</small></div><span class="panel-chip">${esc(person.personStatus || "Неизвестно")}</span></div>`).join("");
 }
 function expenseListHtml(node) {
   const expenses = node.expenses || [];
@@ -1911,13 +1938,14 @@ function openEditor(node) {
 }
 function closeEditor() { if ($("#editorDialog").open) $("#editorDialog").close(); state.editDraft = null; }
 function commonFields(draft) {
-  const processCover = draft.type === "process" ? processCoverEditorHtml(draft) : "";
+  const processCover = (draft.type === "process" || draft.type === "person") ? processCoverEditorHtml(draft) : "";
   return `<div class="field"><label>Название</label><input name="title" value="${esc(draft.title)}" required></div>${processCover}<div class="field"><label>Заметка</label><textarea name="note">${esc(draft.note || "")}</textarea></div>`;
 }
 function processCoverEditorHtml(draft) {
   const hasCover = Boolean(draft.coverAssetId);
   const position = processCoverPosition(draft, "2");
-  return `<div class="field process-cover-field"><label>Обложка</label><div class="process-cover-editor">${hasCover ? `<div class="process-cover-thumb"><img data-editor-process-cover="${esc(draft.coverAssetId)}" style="${processCoverStyle(position)}" alt=""></div>` : `<div class="process-cover-empty">Обложка не добавлена</div>`}<div class="process-cover-buttons"><button type="button" class="ghost" data-editor-action="newProcessCover">Новая обложка</button><button type="button" class="ghost" data-editor-action="positionProcessCover" ${hasCover ? "" : "disabled"}>Настроить существующую</button></div></div></div>`;
+  const isPerson = draft.type === "person";
+  return `<div class="field process-cover-field"><label>${isPerson ? "Фото" : "Обложка"}</label><div class="process-cover-editor">${hasCover ? `<div class="process-cover-thumb ${isPerson ? "person-photo-thumb" : ""}"><img data-editor-process-cover="${esc(draft.coverAssetId)}" style="${processCoverStyle(position)}" alt=""></div>` : `<div class="process-cover-empty">${isPerson ? "Фото не добавлено" : "Обложка не добавлена"}</div>`}<div class="process-cover-buttons"><button type="button" class="ghost" data-editor-action="newProcessCover">${isPerson ? "Добавить / заменить фото" : "Новая обложка"}</button><button type="button" class="ghost" data-editor-action="positionProcessCover" ${hasCover ? "" : "disabled"}>Настроить положение</button>${hasCover ? `<button type="button" class="ghost danger-text" data-editor-action="removeProcessCover">Удалить</button>` : ""}</div></div></div>`;
 }
 function statusOptions(value) {
   return Object.entries(STATUS_LABELS).map(([key, label]) => `<option value="${key}" ${value === key ? "selected" : ""}>${label}</option>`).join("");
@@ -1932,12 +1960,16 @@ function renderEditorBody() {
     <div class="field-grid"><div class="field"><label>Бюджет</label><input name="budget" inputmode="decimal" value="${esc(d.budget || "")}"></div><div class="field"><label>Срок</label><input name="deadline" type="date" value="${esc(d.deadline || "")}"></div></div>
     <div class="field-grid"><div class="field"><label>Аванс</label><input name="advance" inputmode="decimal" value="${esc(d.advance || "")}"></div><div class="field"><label>Остаток</label><input name="balance" inputmode="decimal" value="${esc(d.balance || "")}"></div></div>
     <div class="editor-group"><h3>Основные материалы</h3><button type="button" class="ghost" data-editor-action="addAssets">＋ Изображения, PDF и векторные файлы</button></div>`;
-  if (d.type === "person") html += `
+  if (d.type === "person") {
+    const knownStatuses = ["Неизвестно","Временно","Перспективный","Работаем"];
+    const mode = knownStatuses.includes(d.personStatusMode) ? d.personStatusMode : (knownStatuses.includes(d.personStatus) ? d.personStatus : "custom");
+    html += `
     <div class="field"><label>Специализация</label><input name="speciality" value="${esc(d.speciality || "")}"></div>
-    <div class="field"><label>Навыки, материалы, ключевые слова</label><input name="tags" value="${esc(d.tags || "")}"></div>
+    <div class="field"><label>Ключевые слова</label><input name="tags" value="${esc(d.tags || "")}"></div>
     <div class="field-grid"><div class="field"><label>Телефон</label><input name="phone" value="${esc(d.phone || "")}"></div><div class="field"><label>Email</label><input name="email" type="email" value="${esc(d.email || "")}"></div></div>
     <div class="field-grid"><div class="field"><label>Сайт</label><input name="site" value="${esc(d.site || "")}"></div><div class="field"><label>Соцсеть</label><input name="social" value="${esc(d.social || "")}"></div></div>
-    <div class="field"><label>Зона внимания</label><select name="zone">${["В работе","Ближнее поле","Резерв","Дальняя полка","Архив"].map(value => `<option ${d.zone === value ? "selected" : ""}>${value}</option>`).join("")}</select></div>`;
+    <div class="field person-status-field"><label>Статус человека</label><select name="personStatusMode" id="personStatusMode">${knownStatuses.map(value => `<option value="${value}" ${mode === value ? "selected" : ""}>${value}</option>`).join("")}<option value="custom" ${mode === "custom" ? "selected" : ""}>Свой вариант</option></select><div id="personCustomStatusWrap" class="person-custom-status ${mode === "custom" ? "" : "hidden"}"><div class="input-counter-wrap"><input id="personCustomStatus" maxlength="30" value="${esc(mode === "custom" ? (d.personStatus || "") : "")}" placeholder="До 30 символов"><span id="personCustomStatusCounter">${String(mode === "custom" ? (d.personStatus || "") : "").length} / 30</span></div></div></div>`;
+  }
   if (d.type === "idea") html += `
     <div class="field-grid"><div class="field"><label>Источник</label><select name="source">${["Pinterest","Instagram","YouTube","Сайт","Собственная идея"].map(value => `<option ${d.source === value ? "selected" : ""}>${value}</option>`).join("")}</select></div><div class="field"><label>Ссылка</label><input name="url" value="${esc(d.url || "")}"></div></div>
     <div class="field"><label>Теги, материалы и технологии</label><input name="tags" value="${esc(d.tags || "")}"></div>
@@ -1964,6 +1996,7 @@ function bindEditorDynamicActions() {
     if (action === "addAssets") { state.assetTargetNodeId = state.activeNodeId; $("#assetInput").click(); }
     if (action === "newProcessCover") $("#processCoverInput").click();
     if (action === "positionProcessCover" && state.editDraft?.coverAssetId) openProcessCoverPositionDialog(state.editDraft.coverAssetId);
+    if (action === "removeProcessCover") removeProcessCoverFromDraft();
     if (action === "addStage") { state.editDraft.stages ||= []; state.editDraft.stages.push({ id: uid(), title: "Новый этап", progress: 0, deadline: "" }); renderEditorBody(); }
     if (action === "addTask") { state.editDraft.tasks ||= []; state.editDraft.tasks.push({ id: uid(), title: "Новая задача", due: "", done: false, personId: "" }); renderEditorBody(); }
     if (action === "addExpense") { state.editDraft.expenses ||= []; state.editDraft.expenses.push({ id: uid(), title: "Новая затрата", amount: "", date: todayISO() }); renderEditorBody(); }
@@ -1974,13 +2007,28 @@ function bindEditorDynamicActions() {
     if (taskId) { state.editDraft.tasks = state.editDraft.tasks.filter(item => item.id !== taskId); renderEditorBody(); }
     if (expenseId) { state.editDraft.expenses = state.editDraft.expenses.filter(item => item.id !== expenseId); renderEditorBody(); }
   };
+  const statusSelect = $("#personStatusMode", $("#editorBody"));
+  const customWrap = $("#personCustomStatusWrap", $("#editorBody"));
+  const customInput = $("#personCustomStatus", $("#editorBody"));
+  const customCounter = $("#personCustomStatusCounter", $("#editorBody"));
+  const updateCustom = () => {
+    if (!statusSelect || !customWrap) return;
+    const custom = statusSelect.value === "custom";
+    customWrap.classList.toggle("hidden", !custom);
+    if (customInput) { if (customInput.value.length > 30) customInput.value = customInput.value.slice(0,30); if (customCounter) customCounter.textContent = `${customInput.value.length} / 30`; }
+  };
+  statusSelect?.addEventListener("change", updateCustom);
+  customInput?.addEventListener("input", updateCustom);
+  updateCustom();
 }
 async function hydrateProcessCoverEditor() {
   const img = $('[data-editor-process-cover]', $("#editorBody")); if (!img) return;
   const url = await assetUrl(img.dataset.editorProcessCover).catch(() => null); if (url && img.isConnected) img.src = url;
 }
 function removeProcessCoverFromDraft() {
-  if (!state.editDraft || state.editDraft.type !== "process") return;
+  if (!state.editDraft || !["process","person"].includes(state.editDraft.type)) return;
+  const oldId = state.editDraft.coverAssetId;
+  if (oldId) { state.editDraft._removedCoverId = oldId; state.editDraft.assets = (state.editDraft.assets || []).filter(asset => asset.id !== oldId); }
   state.editDraft.coverAssetId = ""; state.editDraft.coverPosition = { x: 0, y: 0, scale: 1 }; state.editDraft.coverPositions = normalizedProcessCoverPositions({}); renderEditorBody();
 }
 function openCoverQuickMenu(node){
@@ -2061,7 +2109,7 @@ function startQuickPositionCover(){
 }
 async function handleProcessCoverFile(event) {
   const file = event.target.files?.[0]; event.target.value = "";
-  if (!file || !state.editDraft || state.editDraft.type !== "process") return;
+  if (!file || !state.editDraft || !["process","person"].includes(state.editDraft.type)) return;
   if (state.quickCoverNodeId) {
     const quickDialog = $("#coverQuickMenu");
     quickDialog.classList.remove("is-leaving");
@@ -2089,6 +2137,7 @@ async function openProcessCoverPositionDialog(assetId) {
   const url = await assetUrl(assetId).catch(() => null); if (!url) return;
   state.coverPositionDraft = normalizedProcessCoverPositions(state.editDraft || {});
   state.coverPositionMode = "2";
+  const title = $("#processCoverDialog h2"); if (title) title.textContent = state.editDraft?.type === "person" ? "Настроить фото" : "Настроить обложку";
   $("#processCoverPreview").src = url;
   setProcessCoverMode("2");
   const dialog = $("#processCoverDialog"); if (!dialog.open) { dialog.showModal(); requestAnimationFrame(()=>dialog.classList.add("is-visible")); }
@@ -2251,7 +2300,7 @@ function syncDraftDynamicFields() {
   d.expenses = $$('[data-expense-id]', $("#editorBody")).map(row => ({ id: row.dataset.expenseId, title: $('[data-expense-title]', row).value.trim(), amount: Number(String($('[data-expense-amount]', row).value || "0").replace(",", ".")), date: (d.expenses || []).find(item => item.id === row.dataset.expenseId)?.date || todayISO() }));
   d.peopleIds = [...($("#draftPeople")?.selectedOptions || [])].map(option => option.value);
 }
-function saveEditor(event) {
+async function saveEditor(event) {
   event.preventDefault();
   syncDraftDynamicFields();
   const d = state.editDraft; const form = new FormData(event.currentTarget);
@@ -2260,9 +2309,20 @@ function saveEditor(event) {
     if (["budget","advance","balance","positions","progress"].includes(key)) d[key] = value === "" ? "" : Number(String(value).replace(",", "."));
     else d[key] = String(value).trim();
   }
+  if (d.type === "person") {
+    const mode = $("#personStatusMode", event.currentTarget)?.value || "Неизвестно";
+    if (mode === "custom") {
+      const custom = String($("#personCustomStatus", event.currentTarget)?.value || "").trim().slice(0,30);
+      if (!custom) return toast("Введите свой статус");
+      d.personStatusMode = "custom"; d.personStatus = custom;
+    } else { d.personStatusMode = mode; d.personStatus = mode; }
+    delete d.zone;
+  }
   if (d.type === "process") updateProcessProgress(d);
+  const removedCoverId = d._removedCoverId || ""; delete d._removedCoverId;
   const index = state.data.nodes.findIndex(node => node.id === d.id);
   if (index >= 0) state.data.nodes[index] = d;
+  if (removedCoverId) { releaseObjectUrl(removedCoverId); await deleteAssetRecord(removedCoverId).catch(()=>{}); }
   const savedId=d.id; state.editDraft = null; saveData(); closeEditor(); render(); const saved=nodeById(savedId); if(saved){openDetail(saved); requestAnimationFrame(()=>{$("#detailBody").scrollTop=state.detailScrollTop||0;});} toast("Карточка сохранена");
 }
 function archiveActiveNode() {
