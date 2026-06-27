@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.31";
+const VERSION = "6.0.32";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -119,6 +119,9 @@ const state = {
   linkDrag: null,
   linkCreateSourceId: null,
   linkDropTargetId: null,
+  linkFlowGesture: null,
+  linkFlow: null,
+  justCreatedId: null,
   isReloadingForWorker: false
 };
 
@@ -217,6 +220,7 @@ function normalizeData(data) {
   const normalized = { ...base, ...data };
   normalized.nodes = Array.isArray(data.nodes) ? data.nodes.map(node => {
     const normalizedNode = { level: 2, assets: [], archived: false, status: "active", ...node };
+    if (Number(normalizedNode.level) === 3) normalizedNode.level = 2;
     if (normalizedNode.type === "process") {
       normalizedNode.stages = Array.isArray(normalizedNode.stages) ? normalizedNode.stages : [];
       normalizedNode.phonebook = Array.isArray(normalizedNode.phonebook) ? normalizedNode.phonebook.map(contact => ({ ...contact, messengers: Array.isArray(contact.messengers) ? contact.messengers : [] })) : [];
@@ -251,7 +255,6 @@ function linkNodesFor(id) {
 }
 function cardDims(node) {
   if ((node.level || 2) === 1) return { w: 128, h: 128 };
-  if ((node.level || 2) === 3) return { w: 310, h: 224 };
   return { w: 230, h: 154 };
 }
 function screenToWorld(x, y) {
@@ -608,7 +611,7 @@ function switchSpace(space) {
 function cardClass(node) {
   const level = node.level || 2;
   const statusClass = node.status === "paused" ? "status-paused" : node.status === "done" ? "status-done" : node.status === "cancelled" ? "status-cancelled" : "";
-  return `node-card ${level === 1 ? "compact" : level === 3 ? "expanded" : "medium"} ${statusClass} ${state.selectedId === node.id ? "selected" : ""}`;
+  return `node-card ${level === 1 ? "compact" : "medium"} ${statusClass} ${state.selectedId === node.id ? "selected" : ""}`;
 }
 function nodeSubtitle(node) {
   if (node.type === "project") return node.client || node.address || "Новый проект";
@@ -636,6 +639,7 @@ function renderCards() {
   currentNodes().forEach(node => {
     const article = document.createElement("article");
     article.className = cardClass(node);
+    if (state.justCreatedId === node.id) article.classList.add("newly-created");
     if (state.linkCreateSourceId === node.id) article.classList.add("link-create-source");
     else if (state.linkCreateSourceId) article.classList.add("link-create-candidate");
     article.dataset.id = node.id;
@@ -702,6 +706,7 @@ function renderLinks() {
       pathData = curveBetweenPoints(startPoint, endPoint);
     }
     const selected = state.selectedLinkId === link.id;
+    const flowDirection = state.linkFlow?.linkId === link.id ? state.linkFlow.direction : null;
     const hit = document.createElementNS("http://www.w3.org/2000/svg", "path");
     hit.setAttribute("d", pathData);
     hit.setAttribute("class", "link-hit");
@@ -709,7 +714,7 @@ function renderLinks() {
     svg.appendChild(hit);
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", pathData);
-    path.setAttribute("class", `link-path ${(state.selectedId === a.id || state.selectedId === b.id) ? "active" : ""} ${selected ? "selected" : ""}`);
+    path.setAttribute("class", `link-path ${(state.selectedId === a.id || state.selectedId === b.id) ? "active" : ""} ${selected ? "selected" : ""} ${flowDirection ? `flow-${flowDirection}` : ""}`);
     path.dataset.linkId = link.id;
     svg.appendChild(path);
     [startPoint, endPoint].forEach((point, index) => {
@@ -754,19 +759,49 @@ function handleLinkPointerDown(event) {
     const fixedId = movingEnd === "a" ? link.b : link.a;
     state.linkDrag = { linkId, end: movingEnd, pointerId: event.pointerId, fixedId, originalId: movingEnd === "a" ? link.a : link.b, point: screenToWorld(event.clientX, event.clientY) };
     state.linkDropTargetId = null;
+    state.linkFlowGesture = null;
+  } else {
+    state.linkFlowGesture = { linkId, pointerId: event.pointerId, start: screenToWorld(event.clientX, event.clientY), last: screenToWorld(event.clientX, event.clientY), moved: false };
   }
   renderCards(); renderLinks();
 }
 function handleLinkPointerMove(event) {
   const drag = state.linkDrag;
-  if (!drag || drag.pointerId !== event.pointerId) return;
-  event.preventDefault();
-  drag.point = screenToWorld(event.clientX, event.clientY);
-  const target = findLinkDropTarget(drag.point, drag.fixedId);
-  state.linkDropTargetId = target?.id || null;
-  renderLinks();
+  if (drag && drag.pointerId === event.pointerId) {
+    event.preventDefault();
+    drag.point = screenToWorld(event.clientX, event.clientY);
+    const target = findLinkDropTarget(drag.point, drag.fixedId);
+    state.linkDropTargetId = target?.id || null;
+    renderLinks();
+    return;
+  }
+  const flow = state.linkFlowGesture;
+  if (!flow || flow.pointerId !== event.pointerId) return;
+  const point = screenToWorld(event.clientX, event.clientY);
+  flow.last = point;
+  if (Math.hypot(point.x - flow.start.x, point.y - flow.start.y) > 38 / Math.max(.28, state.camera.scale)) flow.moved = true;
 }
 function finishLinkPointerDrag(event) {
+  const flow = state.linkFlowGesture;
+  if (flow && flow.pointerId === event.pointerId && !state.linkDrag) {
+    state.linkFlowGesture = null;
+    const link = state.data.links.find(item => item.id === flow.linkId);
+    const a = nodeById(link?.a), b = nodeById(link?.b);
+    if (flow.moved && link && a && b) {
+      const geometry = linkGeometry(a, b);
+      const startToA = Math.hypot(flow.start.x - geometry.start.x, flow.start.y - geometry.start.y);
+      const startToB = Math.hypot(flow.start.x - geometry.end.x, flow.start.y - geometry.end.y);
+      const endToA = Math.hypot(flow.last.x - geometry.start.x, flow.last.y - geometry.start.y);
+      const endToB = Math.hypot(flow.last.x - geometry.end.x, flow.last.y - geometry.end.y);
+      const direction = startToA + endToB <= startToB + endToA ? "forward" : "reverse";
+      state.linkFlow = { linkId: link.id, direction };
+      renderLinks();
+      clearTimeout(state.linkFlowTimer);
+      state.linkFlowTimer = setTimeout(() => { state.linkFlow = null; renderLinks(); }, 2400);
+      navigator.vibrate?.(8);
+    }
+    return;
+  }
   const drag = state.linkDrag;
   if (!drag || drag.pointerId !== event.pointerId) return;
   event.preventDefault();
@@ -929,8 +964,10 @@ function drawDots() {
   }
   const ctx = canvas.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, rect.width, rect.height);
   const spacing = 25;
-  for (let y = 12; y < rect.height; y += spacing) {
-    for (let x = 12; x < rect.width; x += spacing) {
+  const offsetX = ((state.camera.tx * .18) % spacing + spacing) % spacing;
+  const offsetY = ((state.camera.ty * .18) % spacing + spacing) % spacing;
+  for (let y = 12 + offsetY - spacing; y < rect.height + spacing; y += spacing) {
+    for (let x = 12 + offsetX - spacing; x < rect.width + spacing; x += spacing) {
       const world = screenToWorld(x, y);
       const pulse = Math.sin((world.x + world.y) * .012) * .025;
       const alpha = .09 + pulse + Math.max(0, state.camera.scale - .8) * .025;
@@ -963,7 +1000,7 @@ function onCanvasPointerMove(event) {
   const gesture = state.canvasGesture; if (!gesture) return;
   if (gesture.type === "pan" && state.canvasPointers.size === 1) {
     const dx = event.clientX - gesture.startX, dy = event.clientY - gesture.startY;
-    if (Math.hypot(dx, dy) > 4) gesture.moved = true;
+    if (Math.hypot(dx, dy) > 4) { gesture.moved = true; $("#canvasViewport").classList.add("is-panning"); }
     state.camera.tx = gesture.tx + dx; state.camera.ty = gesture.ty + dy; applyCamera();
   } else if (state.canvasPointers.size >= 2) {
     const points = [...state.canvasPointers.values()].slice(0, 2);
@@ -979,6 +1016,7 @@ function onCanvasPointerEnd(event) {
   const gesture = state.canvasGesture;
   state.canvasPointers.delete(event.pointerId);
   if (state.canvasPointers.size === 0) {
+    $("#canvasViewport").classList.remove("is-panning");
     if (gesture?.type === "pan" && !gesture.moved && performance.now() - gesture.time < 350) {
       const now = performance.now();
       if (now - state.lastCanvasTap < 320) fitAll(true);
@@ -1046,8 +1084,8 @@ function attachCardGestures(element, node) {
       gesture.moved = true; gesture.type = "drag"; cancelLong(); element.classList.add("dragging");
     }
     if (gesture.type === "drag") {
-      node.x = clamp(gesture.nodeX + dx, 0, WORLD_W - cardDims(node).w);
-      node.y = clamp(gesture.nodeY + dy, 0, WORLD_H - cardDims(node).h);
+      node.x = clamp(gesture.nodeX + dx, -1400, WORLD_W + 1400);
+      node.y = clamp(gesture.nodeY + dy, -1000, WORLD_H + 1000);
       element.style.left = `${node.x}px`; element.style.top = `${node.y}px`; renderLinks();
     }
   });
@@ -1057,9 +1095,9 @@ function attachCardGestures(element, node) {
     pointers.delete(event.pointerId); cancelLong();
     if (gesture?.type === "pinch") {
       if (pointers.size < 2) {
-        const baseNumeric = [0, .76, 1, 1.28][gesture.baseLevel] || 1;
+        const baseNumeric = (gesture.baseLevel || 2) === 1 ? .78 : 1;
         const final = baseNumeric * gesture.visualScale;
-        node.level = final < .89 ? 1 : final > 1.16 ? 3 : 2;
+        node.level = final < .89 ? 1 : 2;
         element.style.transform = ""; element.style.zIndex = ""; saveData(); render();
         gesture = null;
       }
@@ -1097,8 +1135,8 @@ function handleCardActionClick(event) {
   if (action === "open") openDetail(node);
   if (action === "connect") startLinkCreation(node);
   if (action === "expand") {
-    node.level = (node.level || 2) === 1 ? 2 : (node.level || 2) === 2 ? 3 : 1;
-    saveData(); render();
+    if ((node.level || 2) === 1) { node.level = 2; saveData(); render(); }
+    else openDetail(node);
   }
   if (action === "quickExpense") {
     const title = $("[data-expense-title]", card)?.value.trim();
@@ -1135,13 +1173,8 @@ function completeLinkCreation(target) {
 }
 function quickCreateFromDock(type) {
   closeOverlays();
-  if (type === "process") {
-    let project = nodeById(state.selectedId);
-    if (project?.type === "process") project = nodeById(project.projectId);
-    if (!project || project.type !== "project" || project.archived) return toast("Сначала выберите карточку проекта");
-    return createProcessForProject(project);
-  }
-  if (["person","idea","goal"].includes(type)) return createNode(type, null, true);
+  if (type === "process") return createStandaloneProcess();
+  if (["person","idea","goal"].includes(type)) return createNode(type, null, false, true);
 }
 
 function toggleCreateMenu() {
@@ -1179,7 +1212,7 @@ function handleCreateAction(event) {
   if (action === "branch-idea") return createNode("idea", parent, true);
   if (action === "branch-goal") return createNode("goal", parent, true);
 }
-function createNode(type, parent = null, openEditorNow = true) {
+function createNode(type, parent = null, openEditorNow = true, delayedEditor = false) {
   const point = parent ? branchPosition(parent) : screenToWorld(innerWidth / 2, innerHeight / 2);
   const defaults = {
     project: { title: "Новый проект", status: "preparation", progress: 0, client: "", address: "", budget: "", assets: [] },
@@ -1190,9 +1223,34 @@ function createNode(type, parent = null, openEditorNow = true) {
   const node = { id: uid(), type, space: state.space, x: clamp(point.x, 50, WORLD_W - 350), y: clamp(point.y, 80, WORLD_H - 300), level: 2, note: "", archived: false, ...defaults[type] };
   state.data.nodes.push(node);
   if (parent) state.data.links.push({ id: uid(), a: parent.id, b: node.id, kind: type });
-  state.selectedId = node.id; saveData(); render(); focusNode(node);
+  state.selectedId = node.id; state.justCreatedId = node.id; saveData(); render(); focusNode(node);
+  setTimeout(() => { if (state.justCreatedId === node.id) { state.justCreatedId = null; renderCards(); } }, 900);
   if (openEditorNow) setTimeout(() => openEditor(node), 220);
+  if (delayedEditor) {
+    toast(`${TYPE_LABELS[type]} создан${type === "idea" || type === "goal" ? "а" : ""}`);
+    setTimeout(() => {
+      if (!nodeById(node.id) || node.archived || document.querySelector("dialog[open]") || !$("#scrim").classList.contains("hidden")) return;
+      openEditor(node);
+    }, 2300);
+  }
   return node;
+}
+function createStandaloneProcess() {
+  const point = screenToWorld(innerWidth / 2, Math.max(170, (innerHeight - 210) / 2));
+  const process = {
+    id: uid(), type: "process", space: state.space, projectId: null,
+    x: clamp(point.x - 145, -1400, WORLD_W + 1400), y: clamp(point.y - 90, -1000, WORLD_H + 1000), level: 2,
+    title: "Новый рабочий процесс", status: "active", progress: 0, stages: [], tasks: [], phonebook: [], peopleIds: [], expenses: [], assets: [], archived: false
+  };
+  state.data.nodes.push(process);
+  state.selectedId = process.id; state.justCreatedId = process.id;
+  saveData(); render(); focusNode(process); toast("Рабочий процесс создан");
+  setTimeout(() => { if (state.justCreatedId === process.id) { state.justCreatedId = null; renderCards(); } }, 900);
+  setTimeout(() => {
+    if (!nodeById(process.id) || process.archived || document.querySelector("dialog[open]") || !$("#scrim").classList.contains("hidden")) return;
+    openEditor(process);
+  }, 2300);
+  return process;
 }
 function branchPosition(parent) {
   const connected = linkNodesFor(parent.id).length;
@@ -1211,7 +1269,9 @@ function createProcessForProject(project) {
     status: "active", progress: 0, stages: [], tasks: [], phonebook: [], peopleIds: [], expenses: [], assets: [], archived: false
   };
   state.data.nodes.push(process); state.data.links.push({ id: uid(), a: project.id, b: process.id, kind: "process" });
-  state.selectedId = process.id; saveData(); render(); focusNode(process); setTimeout(() => openEditor(process), 220);
+  state.selectedId = process.id; state.justCreatedId = process.id; saveData(); render(); focusNode(process);
+  setTimeout(() => { if (state.justCreatedId === process.id) { state.justCreatedId = null; renderCards(); } }, 900);
+  setTimeout(() => openEditor(process), 2300);
 }
 function createBranchFor(node) {
   state.selectedId = node.id;
