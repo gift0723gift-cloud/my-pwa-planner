@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.30";
+const VERSION = "6.0.31";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -56,7 +56,7 @@ function icon(name, className = "") {
     task: `<circle cx="12" cy="12" r="8.5"/><path d="m8.2 12 2.4 2.4 5.2-5.4"/>`,
     people: `<circle cx="9" cy="8" r="2.5"/><circle cx="16" cy="9" r="2"/><path d="M4 19c.6-3.5 2.2-5.2 5-5.2s4.4 1.7 5 5.2M14 14.5c2.7-.4 4.5 1 5 4.5"/>`,
     budget: `<circle cx="12" cy="12" r="8.5"/><path d="M9 9.2h4.2a2 2 0 0 1 0 4H10m2-6v9.5"/>`,
-    focus: `<path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/><circle cx="12" cy="12" r="3"/>`,
+    focus: `<path d="M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5"/><path d="M4 4l5 5M20 4l-5 5M4 20l5-5M20 20l-5-5"/>`,
     export: `<path d="M12 3v12m0-12-4 4m4-4 4 4"/><path d="M5 13v7h14v-7"/>`,
     import: `<path d="M12 15V3m0 12-4-4m4 4 4-4"/><path d="M5 13v7h14v-7"/>`,
     logout: `<path d="M10 4H5v16h5M14 8l4 4-4 4M8 12h10"/>`,
@@ -117,6 +117,7 @@ const state = {
   stageReturnScrollTop: 0,
   selectedLinkId: null,
   linkDrag: null,
+  linkCreateSourceId: null,
   linkDropTargetId: null,
   isReloadingForWorker: false
 };
@@ -366,6 +367,8 @@ function setSession(record) { localStorage.setItem(SESSION_KEY, JSON.stringify(r
 function clearSession() { localStorage.removeItem(SESSION_KEY); }
 
 function initializeOnboarding() {
+  if (window.__boonwaveOnboardingStarted) return;
+  window.__boonwaveOnboardingStarted = true;
   hydrateStaticIcons();
   updateThemeControl();
   const debugDemo = new URLSearchParams(location.search).get("demo") === "1";
@@ -453,6 +456,8 @@ function bindWorkspaceOnce() {
   $("#desktopZoomRange")?.addEventListener("input", handleDesktopZoomInput, { passive: true });
   $("#desktopZoomRange")?.addEventListener("change", handleDesktopZoomInput, { passive: true });
   $("#fitButton").addEventListener("click", smartFocusCurrent);
+  $("#resultsQuickButton")?.addEventListener("click", () => openPanel("results"));
+  $$("[data-quick-create]").forEach(button => button.addEventListener("click", () => quickCreateFromDock(button.dataset.quickCreate)));
   $("#brandHome").addEventListener("click", () => fitAll(true));
   $("#menuButton").addEventListener("click", () => showOverlay("accountMenu"));
   $("#scrim").addEventListener("click", closeOverlays);
@@ -573,7 +578,7 @@ function bindWorkspaceOnce() {
   $("#assetDelete").addEventListener("click", deleteCurrentAsset);
   $("#detailBody").addEventListener("click", handleDetailClick);
   $("#panelBody").addEventListener("click", handlePanelClick);
-  $$('.bottom-nav button').forEach(button => button.addEventListener("click", () => openPanel(button.dataset.panel)));
+  $$('.bottom-nav button[data-panel]').forEach(button => button.addEventListener("click", () => openPanel(button.dataset.panel)));
   $('[data-action="dismissHint"]').addEventListener("click", () => {
     state.data.settings.hintDismissed = true; saveData(); $("#gestureHint").classList.add("hidden");
   });
@@ -631,6 +636,8 @@ function renderCards() {
   currentNodes().forEach(node => {
     const article = document.createElement("article");
     article.className = cardClass(node);
+    if (state.linkCreateSourceId === node.id) article.classList.add("link-create-source");
+    else if (state.linkCreateSourceId) article.classList.add("link-create-candidate");
     article.dataset.id = node.id;
     article.dataset.type = node.type;
     article.style.left = `${node.x}px`;
@@ -654,7 +661,7 @@ function renderCards() {
       </div>
       <div class="card-actions">
         <button class="card-action" data-card-action="open" aria-label="Открыть">${icon("open")}</button>
-        <button class="card-action primary-action" data-card-action="branch" aria-label="Создать ветвь">${icon("branch")}</button>
+        <button class="card-action primary-action" data-card-action="connect" aria-label="Создать связь">${icon("link")}</button>
         <button class="card-action" data-card-action="expand" aria-label="Изменить размер">${icon("expand")}</button>
       </div>`;
     attachCardGestures(article, node);
@@ -976,7 +983,9 @@ function onCanvasPointerEnd(event) {
       const now = performance.now();
       if (now - state.lastCanvasTap < 320) fitAll(true);
       state.lastCanvasTap = now;
-      state.selectedId = null; state.selectedLinkId = null; renderCards(); renderLinks();
+      state.selectedId = null; state.selectedLinkId = null;
+      if (state.linkCreateSourceId) { state.linkCreateSourceId = null; toast("Создание связи отменено"); }
+      renderCards(); renderLinks();
     }
     state.canvasGesture = null;
   } else if (state.canvasPointers.size === 1) {
@@ -1060,6 +1069,11 @@ function attachCardGestures(element, node) {
     if (gesture?.type === "drag") {
       saveData(); renderLinks();
     } else if (gesture && !gesture.moved && !longTriggered) {
+      if (state.linkCreateSourceId) {
+        completeLinkCreation(node);
+        gesture = null;
+        return;
+      }
       const now = performance.now();
       if (state.lastCardTap.id === node.id && now - state.lastCardTap.time < 320) {
         state.lastCardTap = { id: null, time: 0 }; openDetail(node);
@@ -1081,7 +1095,7 @@ function handleCardActionClick(event) {
   const card = button.closest(".node-card"); const node = nodeById(card?.dataset.id); if (!node) return;
   const action = button.dataset.cardAction;
   if (action === "open") openDetail(node);
-  if (action === "branch") createBranchFor(node);
+  if (action === "connect") startLinkCreation(node);
   if (action === "expand") {
     node.level = (node.level || 2) === 1 ? 2 : (node.level || 2) === 2 ? 3 : 1;
     saveData(); render();
@@ -1093,6 +1107,43 @@ function handleCardActionClick(event) {
     node.expenses ||= []; node.expenses.push({ id: uid(), title, amount, date: todayISO() }); saveData(); render(); toast("Добавлено в затраты");
   }
 }
+function startLinkCreation(node) {
+  if (!node || node.archived) return;
+  state.linkCreateSourceId = node.id;
+  state.selectedId = node.id;
+  state.selectedLinkId = null;
+  renderCards(); renderLinks();
+  toast("Выберите карточку для новой связи");
+}
+function completeLinkCreation(target) {
+  const source = nodeById(state.linkCreateSourceId);
+  if (!source || !target || target.archived) { state.linkCreateSourceId = null; renderCards(); return; }
+  if (source.id === target.id) {
+    state.linkCreateSourceId = null; renderCards();
+    return toast("Создание связи отменено");
+  }
+  const duplicate = state.data.links.some(link => (link.a === source.id && link.b === target.id) || (link.a === target.id && link.b === source.id));
+  if (duplicate) {
+    state.linkCreateSourceId = null; renderCards(); renderLinks();
+    return toast("Такая связь уже существует");
+  }
+  state.data.links.push({ id: uid(), a: source.id, b: target.id, kind: "manual", createdAt: new Date().toISOString() });
+  state.linkCreateSourceId = null;
+  state.selectedId = target.id;
+  saveData(); renderCards(); renderLinks();
+  toast("Связь создана");
+}
+function quickCreateFromDock(type) {
+  closeOverlays();
+  if (type === "process") {
+    let project = nodeById(state.selectedId);
+    if (project?.type === "process") project = nodeById(project.projectId);
+    if (!project || project.type !== "project" || project.archived) return toast("Сначала выберите карточку проекта");
+    return createProcessForProject(project);
+  }
+  if (["person","idea","goal"].includes(type)) return createNode(type, null, true);
+}
+
 function toggleCreateMenu() {
   if (!$("#createMenu").classList.contains("hidden")) return closeOverlays();
   renderCreateActions(); showOverlay("createMenu");
@@ -2014,7 +2065,6 @@ async function deleteCurrentAsset() {
 /* Panels */
 function openPanel(panel) {
   $$('.bottom-nav button').forEach(button => button.classList.toggle("active", button.dataset.panel === panel));
-  if (panel === "tree") { closeOverlays(); return; }
   const titles = { today: "Сегодня", results: "Результаты", archive: "Архив" };
   $("#panelTitle").textContent = titles[panel]; $("#panelEyebrow").textContent = state.space === "work" ? "ПРОЕКТЫ" : "ЛИЧНОЕ";
   $("#panelBody").innerHTML = panel === "today" ? todayPanelHtml() : panel === "results" ? resultsPanelHtml() : archivePanelHtml();
@@ -2071,7 +2121,7 @@ function showOverlay(id) {
 function closeOverlays() {
   ["createMenu","accountMenu","sidePanel"].forEach(name => $("#" + name).classList.add("hidden"));
   $("#scrim").classList.add("hidden"); $("#createButton").classList.remove("active");
-  $$('.bottom-nav button').forEach(button => button.classList.toggle("active", button.dataset.panel === "tree"));
+  $$('.bottom-nav button').forEach(button => button.classList.remove("active"));
 }
 function handleMenuAction(event) {
   const button = event.target.closest("[data-menu-action]"); if (!button) return;
@@ -2115,7 +2165,13 @@ function toast(message) {
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || location.protocol === "file:") return;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (state.isReloadingForWorker) return; state.isReloadingForWorker = true; location.reload();
+    if (state.isReloadingForWorker) return;
+    if (!$("#app")?.classList.contains("app-ready")) return;
+    const reloadKey = `boonwave_sw_reloaded_${VERSION}`;
+    if (sessionStorage.getItem(reloadKey)) return;
+    sessionStorage.setItem(reloadKey, "1");
+    state.isReloadingForWorker = true;
+    location.reload();
   });
   navigator.serviceWorker.register(`sw.js?v=${VERSION}`).then(registration => registration.update()).catch(error => console.warn("SW", error));
 }
