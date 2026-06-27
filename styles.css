@@ -944,7 +944,7 @@ html[data-theme="light"] .desktop-zoom-slider input[type=range]::-webkit-slider-
 .canvas-viewport.is-panning{cursor:grabbing}
 .canvas-viewport.is-panning #dotCanvas{filter:brightness(1.12)}
 
-/* v6.0.36 — tapered link impulse, person photo and status */
+/* v6.0.38 — tapered link impulse, person photo and status */
 .link-flow-overlay{fill:none;stroke:url(#linkPulseGradient);stroke-linecap:round;pointer-events:none;animation:linkPulseForward 5.1s linear infinite;will-change:stroke-dashoffset;}
 .link-flow-overlay.reverse{animation-name:linkPulseReverse}
 .link-flow-overlay.tail{stroke-width:1.15;stroke-dasharray:250 750;opacity:.22;filter:drop-shadow(0 0 5px rgba(96,171,255,.12))}
@@ -962,3 +962,25 @@ html[data-theme="light"] .desktop-zoom-slider input[type=range]::-webkit-slider-
 .input-counter-wrap{position:relative}
 .input-counter-wrap input{padding-right:62px!important}
 .input-counter-wrap span{position:absolute;right:11px;top:50%;transform:translateY(-50%);font-size:8px;color:#7f899b;pointer-events:none}
+
+/* v6.0.38 — карточка человека: только основное действие в футере */
+.person-detail-footer #detailEditButton{flex:1;min-width:0}
+.person-detail-footer{display:flex!important}
+
+/* v6.0.38 — person links and editor polish */
+.external-person-link{max-width:100%;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.external-person-link:active{transform:scale(.985);filter:brightness(1.08)}
+
+
+/* v6.0.39 — single/double eye interaction and tapered comet flow */
+.link-flow-overlay{fill:none;stroke:url(#linkPulseGradient);stroke-linecap:round;pointer-events:none;will-change:stroke-dashoffset;animation-duration:5.1s;animation-timing-function:linear;animation-iteration-count:infinite;animation-name:cometFlowForward}
+.link-flow-overlay.reverse{animation-name:cometFlowReverse}
+.link-flow-overlay.comet-head{stroke-width:6.2;stroke-dasharray:1 999;opacity:.96;filter:drop-shadow(0 0 3px rgba(170,188,255,.95)) drop-shadow(0 0 9px rgba(90,219,244,.52))}
+.link-flow-overlay.comet-body-1{stroke-width:4.1;stroke-dasharray:34 966;opacity:.78;filter:drop-shadow(0 0 5px rgba(108,160,255,.38))}
+.link-flow-overlay.comet-body-2{stroke-width:3.35;stroke-dasharray:52 948;opacity:.64;filter:drop-shadow(0 0 5px rgba(100,151,255,.28))}
+.link-flow-overlay.comet-tail-1{stroke-width:2.7;stroke-dasharray:66 934;opacity:.50;filter:drop-shadow(0 0 4px rgba(95,145,255,.22))}
+.link-flow-overlay.comet-tail-2{stroke-width:2.05;stroke-dasharray:72 928;opacity:.36;filter:drop-shadow(0 0 3px rgba(92,140,255,.17))}
+.link-flow-overlay.comet-tail-3{stroke-width:1.4;stroke-dasharray:66 934;opacity:.23;filter:drop-shadow(0 0 3px rgba(88,135,255,.12))}
+.link-flow-overlay.comet-tail-4{stroke-width:.75;stroke-dasharray:54 946;opacity:.11;filter:none}
+@keyframes cometFlowForward{from{stroke-dashoffset:calc(1000 + var(--comet-lag,0))}to{stroke-dashoffset:calc(0 + var(--comet-lag,0))}}
+@keyframes cometFlowReverse{from{stroke-dashoffset:calc(0 - var(--comet-lag,0))}to{stroke-dashoffset:calc(1000 - var(--comet-lag,0))}}

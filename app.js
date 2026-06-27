@@ -1,12 +1,12 @@
 "use strict";
 
-const VERSION = "6.0.36";
+const VERSION = "6.0.40";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
 const DATA_PREFIX = "boonwave_v6_data_";
 const DATA_BACKUP_PREFIX = "boonwave_v6_backup_";
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 const GUEST_ID = "visual-demo";
 const WORLD_W = 3600;
 const WORLD_H = 2600;
@@ -19,6 +19,21 @@ const clone = value => JSON.parse(JSON.stringify(value));
 const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
 const money = value => value === "" || value == null ? "—" : `${Number(value || 0).toLocaleString("ru-RU")} ₽`;
 const todayISO = () => new Date().toISOString().slice(0, 10);
+function externalHref(value, kind = "site") {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (kind === "social" && raw.startsWith("@")) return `https://instagram.com/${encodeURIComponent(raw.slice(1))}`;
+  if (kind === "telegram") {
+    if (raw.startsWith("@")) return `https://t.me/${encodeURIComponent(raw.slice(1))}`;
+    if (/^[A-Za-z0-9_]{5,32}$/.test(raw)) return `https://t.me/${encodeURIComponent(raw)}`;
+  }
+  let candidate = raw;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(candidate)) candidate = `https://${candidate.replace(/^\/\//, "")}`;
+  try {
+    const url = new URL(candidate);
+    return ["http:", "https:"].includes(url.protocol) ? url.href : "";
+  } catch { return ""; }
+}
 
 const TYPE_LABELS = {
   project: "Проект",
@@ -66,6 +81,8 @@ function icon(name, className = "") {
     plus: `<path d="M12 5v14M5 12h14"/>`,
     calendar: `<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/>`,
     link: `<path d="M9.5 14.5 8 16a3 3 0 0 1-4-4l3-3a3 3 0 0 1 4 0M14.5 9.5 16 8a3 3 0 1 1 4 4l-3 3a3 3 0 0 1-4 0M9 12h6"/>`,
+    telegram: `<path d="m21 3-7.6 18-3.7-6.5L3 11.2 21 3Z"/><path d="m9.7 14.5 4.7-4.1"/>`,
+    location: `<path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/>`,
     restore: `<path d="M4 8v5h5"/><path d="M5.5 13a7 7 0 1 0 2-6"/>`,
     phone: `<path d="M7 3h3l1.2 4-2 1.6a15 15 0 0 0 6.2 6.2l1.6-2L21 14v3c0 2-1 3-3 3C10.3 20 4 13.7 4 6c0-2 1-3 3-3Z"/>`,
     mail: `<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/>`,
@@ -92,6 +109,7 @@ const state = {
   canvasGesture: null,
   lastCanvasTap: 0,
   lastCardTap: { id: null, time: 0 },
+  eyeTap: { id: null, timer: null, time: 0 },
   activeNodeId: null,
   assetTargetNodeId: null,
   assetViewerNodeId: null,
@@ -250,6 +268,8 @@ function normalizeData(data) {
       const known = ["Неизвестно","Временно","Перспективный","Работаем"];
       normalizedNode.personStatus = known.includes(legacyZone) ? legacyZone : (legacyZone ? legacyZone.slice(0,30) : "Неизвестно");
       normalizedNode.personStatusMode = known.includes(normalizedNode.personStatus) ? normalizedNode.personStatus : "custom";
+      normalizedNode.telegram = String(normalizedNode.telegram || "");
+      normalizedNode.address = String(normalizedNode.address || "");
     }
     if (Number(normalizedNode.level) === 3) normalizedNode.level = 2;
     if (normalizedNode.type === "process") {
@@ -771,12 +791,22 @@ function renderLinks() {
     svg.appendChild(path);
 
     if (link.flow && link.flow !== "none") {
+      const cometSegments = [
+        { cls: "comet-tail-4", lag: 310 },
+        { cls: "comet-tail-3", lag: 250 },
+        { cls: "comet-tail-2", lag: 185 },
+        { cls: "comet-tail-1", lag: 120 },
+        { cls: "comet-body-2", lag: 68 },
+        { cls: "comet-body-1", lag: 28 },
+        { cls: "comet-head", lag: 0 }
+      ];
       const addPulse = reverse => {
-        ["tail","body","head"].forEach(layer => {
+        cometSegments.forEach(segment => {
           const pulse = document.createElementNS("http://www.w3.org/2000/svg", "path");
           pulse.setAttribute("d", pathData);
           pulse.setAttribute("pathLength", "1000");
-          pulse.setAttribute("class", `link-flow-overlay ${layer} ${reverse ? "reverse" : "forward"}`);
+          pulse.setAttribute("class", `link-flow-overlay ${segment.cls} ${reverse ? "reverse" : "forward"}`);
+          pulse.style.setProperty("--comet-lag", String(segment.lag));
           svg.appendChild(pulse);
         });
       };
@@ -1340,7 +1370,25 @@ function handleCardActionClick(event) {
   event.stopPropagation();
   const card = button.closest(".node-card"); const node = nodeById(card?.dataset.id); if (!node) return;
   const action = button.dataset.cardAction;
-  if (action === "open") openDetail(node);
+  if (action === "open") {
+    const now = performance.now();
+    if (state.eyeTap.id === node.id && state.eyeTap.timer && now - state.eyeTap.time < 360) {
+      clearTimeout(state.eyeTap.timer);
+      state.eyeTap = { id: null, timer: null, time: 0 };
+      openDetail(node);
+      return;
+    }
+    if (state.eyeTap.timer) clearTimeout(state.eyeTap.timer);
+    state.eyeTap.id = node.id;
+    state.eyeTap.time = now;
+    state.eyeTap.timer = setTimeout(() => {
+      state.eyeTap = { id: null, timer: null, time: 0 };
+      node.level = (node.level || 2) === 1 ? 2 : 1;
+      saveData();
+      render();
+    }, 300);
+    return;
+  }
   if (action === "connect") startLinkCreation(node);
   if (action === "focus") {
     state.selectedId = node.id; state.selectedLinkId = null; state.focusOverview = false;
@@ -1464,7 +1512,7 @@ function createNode(type, parent = null, openEditorNow = true, delayedEditor = f
   const defaults = {
     project: { title: "Новый проект", status: "preparation", progress: 0, client: "", address: "", budget: "", assets: [] },
     goal: { title: "Новая цель", status: "active", progress: 0, deadline: "", metric: "", assets: [] },
-    person: { title: "Новый человек", status: "active", speciality: "", personStatus: "Неизвестно", personStatusMode: "Неизвестно", tags: "", assets: [] },
+    person: { title: "Новый человек", status: "active", speciality: "", personStatus: "Неизвестно", personStatusMode: "Неизвестно", phone: "", telegram: "", address: "", email: "", site: "", social: "", tags: "", assets: [] },
     idea: { title: "Новая идея", status: "active", source: "", tags: "", assets: [] }
   };
   pushUndo("Создание карточки");
@@ -1645,9 +1693,13 @@ function personPhotoMediaHtml(node) {
   return `<img class="person-photo-media" data-detail-cover="${esc(node.coverAssetId)}" style="${processCoverStyle(position)}" alt="">`;
 }
 function personDetailHtml(node) {
+  const siteHref = externalHref(node.site, "site");
+  const socialHref = externalHref(node.social, "social");
+  const telegramHref = externalHref(node.telegram, "telegram");
+  const addressHref = node.address ? `https://maps.apple.com/?q=${encodeURIComponent(node.address)}` : "";
   return `<div class="detail-hero person-detail-hero">${personPhotoMediaHtml(node)}<div class="detail-hero-content"><p>${esc(node.speciality || "Специалист")}</p></div></div>
     <div class="detail-grid"><div class="detail-stat"><small>СТАТУС</small><b>${esc(node.personStatus || "Неизвестно")}</b></div><div class="detail-stat"><small>АКТИВНЫЕ ЗАДАЧИ</small><b>${tasksForPerson(node.id).filter(task => !task.done).length}</b></div></div>
-    <div class="detail-section"><div class="detail-section-head"><h3>Контакты</h3></div><div class="chips">${node.phone ? `<a class="chip" href="tel:${esc(node.phone)}">${icon("phone")} ${esc(node.phone)}</a>` : ""}${node.email ? `<a class="chip" href="mailto:${esc(node.email)}">${icon("mail")} ${esc(node.email)}</a>` : ""}${node.social ? `<span class="chip">${esc(node.social)}</span>` : ""}</div></div>
+    <div class="detail-section"><div class="detail-section-head"><h3>Контакты</h3></div><div class="chips">${node.phone ? `<a class="chip" href="tel:${esc(node.phone)}">${icon("phone")} ${esc(node.phone)}</a>` : ""}${telegramHref ? `<a class="chip external-person-link" href="${esc(telegramHref)}" target="_blank" rel="noopener noreferrer">${icon("telegram")} ${esc(node.telegram)}</a>` : (node.telegram ? `<span class="chip">${icon("telegram")} ${esc(node.telegram)}</span>` : "")}${addressHref ? `<a class="chip external-person-link" href="${esc(addressHref)}" target="_blank" rel="noopener noreferrer">${icon("location")} ${esc(node.address)}</a>` : ""}${node.email ? `<a class="chip" href="mailto:${esc(node.email)}">${icon("mail")} ${esc(node.email)}</a>` : ""}${siteHref ? `<a class="chip external-person-link" href="${esc(siteHref)}" target="_blank" rel="noopener noreferrer">${icon("link")} ${esc(node.site)}</a>` : ""}${socialHref ? `<a class="chip external-person-link" href="${esc(socialHref)}" target="_blank" rel="noopener noreferrer">${esc(node.social)}</a>` : (node.social ? `<span class="chip">${esc(node.social)}</span>` : "")}</div></div>
     ${node.tags ? `<div class="detail-section"><div class="detail-section-head"><h3>Ключевые слова</h3></div><div class="chips">${node.tags.split(",").filter(Boolean).map(tag => `<span class="chip">${esc(tag.trim())}</span>`).join("")}</div></div>` : ""}
     ${node.note ? `<div class="detail-section"><div class="detail-section-head"><h3>Заметка</h3></div><div class="note-block">${esc(node.note)}</div></div>` : ""}`;
 }
@@ -1935,6 +1987,7 @@ function openEditor(node) {
   $("#editorTitle").textContent = node.title || TYPE_LABELS[node.type];
   renderEditorBody();
   const dialog = $("#editorDialog"); if (!dialog.open) dialog.showModal();
+  requestAnimationFrame(() => { const body = $("#editorBody"); if (body) body.scrollTop = 0; });
 }
 function closeEditor() { if ($("#editorDialog").open) $("#editorDialog").close(); state.editDraft = null; }
 function commonFields(draft) {
@@ -1966,8 +2019,11 @@ function renderEditorBody() {
     html += `
     <div class="field"><label>Специализация</label><input name="speciality" value="${esc(d.speciality || "")}"></div>
     <div class="field"><label>Ключевые слова</label><input name="tags" value="${esc(d.tags || "")}"></div>
-    <div class="field-grid"><div class="field"><label>Телефон</label><input name="phone" value="${esc(d.phone || "")}"></div><div class="field"><label>Email</label><input name="email" type="email" value="${esc(d.email || "")}"></div></div>
-    <div class="field-grid"><div class="field"><label>Сайт</label><input name="site" value="${esc(d.site || "")}"></div><div class="field"><label>Соцсеть</label><input name="social" value="${esc(d.social || "")}"></div></div>
+    <div class="field"><label>Телефон</label><input name="phone" inputmode="tel" value="${esc(d.phone || "")}"></div>
+    <div class="field"><label>Telegram</label><input name="telegram" value="${esc(d.telegram || "")}" placeholder="@username или t.me/username"></div>
+    <div class="field"><label>Адрес</label><input name="address" value="${esc(d.address || "")}" placeholder="Город, улица, дом"></div>
+    <div class="field-grid"><div class="field"><label>Email</label><input name="email" type="email" value="${esc(d.email || "")}"></div><div class="field"><label>Сайт</label><input name="site" value="${esc(d.site || "")}"></div></div>
+    <div class="field"><label>Соцсеть</label><input name="social" value="${esc(d.social || "")}"></div>
     <div class="field person-status-field"><label>Статус человека</label><select name="personStatusMode" id="personStatusMode">${knownStatuses.map(value => `<option value="${value}" ${mode === value ? "selected" : ""}>${value}</option>`).join("")}<option value="custom" ${mode === "custom" ? "selected" : ""}>Свой вариант</option></select><div id="personCustomStatusWrap" class="person-custom-status ${mode === "custom" ? "" : "hidden"}"><div class="input-counter-wrap"><input id="personCustomStatus" maxlength="30" value="${esc(mode === "custom" ? (d.personStatus || "") : "")}" placeholder="До 30 символов"><span id="personCustomStatusCounter">${String(mode === "custom" ? (d.personStatus || "") : "").length} / 30</span></div></div></div>`;
   }
   if (d.type === "idea") html += `
@@ -2237,10 +2293,13 @@ function positionProcessLockThumb(unlocked) {
 }
 function updateProcessActionLock(node) {
   const isProcess = node?.type === "process";
+  const isPerson = node?.type === "person";
   const footer=$("#detailFooter"), branch=$("#detailBranchButton"), edit=$("#detailEditButton"), lock=$("#processActionLock"), archive=$("#detailTaskArchiveButton"), nodeArchive=$("#detailNodeArchiveButton");
   footer.classList.toggle("process-detail-footer", isProcess);
+  footer.classList.toggle("person-detail-footer", isPerson);
   archive?.classList.toggle("hidden", !isProcess);
   nodeArchive?.classList.toggle("hidden", !isProcess);
+  branch.classList.toggle("hidden", isPerson);
   edit.classList.toggle("hidden", isProcess);
   lock.classList.add("hidden");
   branch.disabled=false;
