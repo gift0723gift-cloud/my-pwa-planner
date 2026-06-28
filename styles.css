@@ -1087,3 +1087,76 @@ html[data-theme="light"] .desktop-zoom-slider input[type=range]::-webkit-slider-
 .action-sheet{z-index:980}
 .scrim{z-index:970}
 @media(max-width:390px){.node-card.medium[data-type="person"]{--cw:220px;--ch:220px}}
+
+/* v6.0.46 — compact photo cleanup, metric alignment and quiet entity actions */
+.node-card.compact[data-type="person"] .card-shell,
+.node-card.compact[data-type="person"] .card-visual{
+  background-color:#0d1119;
+}
+.node-card.compact[data-type="person"] .card-visual{
+  background-position:center 38%;
+}
+.node-card.compact[data-type="person"] .card-visual::after{
+  background:linear-gradient(180deg,transparent 58%,rgba(8,11,18,.88) 100%);
+}
+
+.node-card.medium[data-type="idea"] .card-content,
+.node-card.medium[data-type="goal"] .card-content{
+  position:relative;
+  height:82px;
+  padding:10px 13px 13px;
+}
+.node-card.medium[data-type="idea"] .card-metrics,
+.node-card.medium[data-type="goal"] .card-metrics{
+  position:absolute;
+  left:13px;
+  bottom:11px;
+  margin:0;
+  align-items:center;
+  gap:6px;
+}
+.node-card.medium[data-type="idea"] .metric,
+.node-card.medium[data-type="goal"] .metric{
+  min-height:23px;
+  padding:0 8px;
+}
+
+.node-card.medium[data-type="idea"] .card-actions,
+.node-card.medium[data-type="goal"] .card-actions{
+  left:auto;
+  right:8px;
+  top:50%;
+  bottom:auto;
+  transform:translateY(-50%);
+  flex-direction:column;
+  gap:6px;
+  padding:0;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  box-shadow:none;
+  backdrop-filter:none;
+}
+.node-card.medium[data-type="idea"].selected .card-actions,
+.node-card.medium[data-type="goal"].selected .card-actions{
+  bottom:auto;
+}
+.node-card.medium[data-type="idea"] .card-action,
+.node-card.medium[data-type="goal"] .card-action{
+  width:32px;
+  height:32px;
+  border-radius:11px;
+  background:rgba(19,25,38,.94);
+  border:1px solid rgba(69,81,109,.78);
+  box-shadow:0 7px 18px rgba(0,0,0,.34);
+  backdrop-filter:blur(10px);
+}
+.node-card.medium[data-type="idea"] .card-action.primary-action,
+.node-card.medium[data-type="goal"] .card-action.primary-action{
+  background:linear-gradient(145deg,rgba(87,70,158,.96),rgba(37,78,113,.96));
+  border-color:rgba(102,122,180,.84);
+}
+.node-card.medium[data-type="idea"].selected .card-content,
+.node-card.medium[data-type="goal"].selected .card-content{
+  padding-right:54px;
+}

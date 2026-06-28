@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.45";
+const VERSION = "6.0.46";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -822,8 +822,10 @@ async function hydrateCardCovers() {
         const position = processCoverPosition(node, String(node.level || 2));
         visual.style.backgroundPosition = `calc(50% + ${Number(position.x || 0)}%) calc(50% + ${Number(position.y || 0)}%)`;
         const base = position.fit === "contain" ? 100 : 100;
-        visual.style.backgroundSize = position.fit === "contain" ? `contain` : `${Math.max(base, Number(position.scale || 1) * 100)}%`;
+        const forceCompactPersonCover = node.type === "person" && Number(node.level || 2) === 1;
+        visual.style.backgroundSize = forceCompactPersonCover ? `${Math.max(112, Number(position.scale || 1) * 100)}%` : (position.fit === "contain" ? `contain` : `${Math.max(base, Number(position.scale || 1) * 100)}%`);
         visual.style.backgroundRepeat = "no-repeat";
+        if (forceCompactPersonCover && !Number(position.y || 0)) visual.style.backgroundPosition = `calc(50% + ${Number(position.x || 0)}%) 38%`;
       }
       visual.querySelector(".card-visual-placeholder")?.remove();
     }
