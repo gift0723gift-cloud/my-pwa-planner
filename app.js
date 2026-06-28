@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.44";
+const VERSION = "6.0.45";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -322,6 +322,9 @@ function linkNodesFor(id) {
 }
 function cardDims(node) {
   if ((node.level || 2) === 1) return { w: 128, h: 128 };
+  if (node.type === "person") return { w: 230, h: 230 };
+  if (node.type === "idea") return { w: 238, h: 176 };
+  if (node.type === "goal") return { w: 230, h: 176 };
   return { w: 230, h: 154 };
 }
 function screenToWorld(x, y) {
@@ -618,6 +621,7 @@ function bindWorkspaceOnce() {
   $("#assetInput").addEventListener("change", handleAssetFiles);
   $("#processCoverInput").addEventListener("change", handleProcessCoverFile);
   $("#processCoverScale").addEventListener("input", updateProcessCoverPreview);
+  $$('[data-cover-fit]', $("#processCoverDialog")).forEach(button=>button.addEventListener("click",()=>setProcessCoverFit(button.dataset.coverFit)));
   $("#processCoverReset").addEventListener("click", resetProcessCoverPosition);
   $("#processCoverApply").addEventListener("click", applyProcessCoverPosition);
   $("#detailClose").addEventListener("click", () => { if ($("#detailDialog").open) $("#detailDialog").close(); });
@@ -814,10 +818,12 @@ async function hydrateCardCovers() {
     if (url && visual.isConnected) {
       visual.style.backgroundImage = `url("${url}")`;
       const node = nodeById(visual.dataset.coverNode);
-      if (node?.type === "process" || node?.type === "person") {
+      if (node) {
         const position = processCoverPosition(node, String(node.level || 2));
         visual.style.backgroundPosition = `calc(50% + ${Number(position.x || 0)}%) calc(50% + ${Number(position.y || 0)}%)`;
-        visual.style.backgroundSize = `${Math.max(100, Number(position.scale || 1) * 100)}%`;
+        const base = position.fit === "contain" ? 100 : 100;
+        visual.style.backgroundSize = position.fit === "contain" ? `contain` : `${Math.max(base, Number(position.scale || 1) * 100)}%`;
+        visual.style.backgroundRepeat = "no-repeat";
       }
       visual.querySelector(".card-visual-placeholder")?.remove();
     }
@@ -1157,28 +1163,53 @@ function applyCamera() {
   syncDesktopZoomSlider();
   if (!state.dotRenderFrame) state.dotRenderFrame = requestAnimationFrame(() => { state.dotRenderFrame = 0; drawDots(); });
 }
+function activeBounds() {
+  const nodes = currentNodes();
+  if (!nodes.length) return null;
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  nodes.forEach(node=>{const d=cardDims(node);minX=Math.min(minX,node.x);minY=Math.min(minY,node.y);maxX=Math.max(maxX,node.x+d.w);maxY=Math.max(maxY,node.y+d.h);});
+  return {minX,minY,maxX,maxY,width:maxX-minX,height:maxY-minY};
+}
+function overviewScale() {
+  const bounds=activeBounds();
+  const rect=$("#canvasViewport").getBoundingClientRect();
+  if(!bounds) return .5;
+  const usableH=Math.max(260,rect.height-210);
+  return clamp(Math.min((rect.width-44)/(bounds.width+180),usableH/(bounds.height+180)),.24,.82);
+}
+function semanticValueToScale(value) {
+  const v=clamp(Number(value||0),-50,50);
+  const overview=overviewScale();
+  const working=.88;
+  const close=1.8;
+  if(v<=0){const t=(v+50)/50;return overview+(working-overview)*t;}
+  return working+(close-working)*(v/50);
+}
+function scaleToSemanticValue(scale) {
+  const overview=overviewScale(), working=.88, close=1.8, s=Number(scale||working);
+  if(s<=working) return clamp(-50+50*((s-overview)/Math.max(.001,working-overview)),-50,0);
+  return clamp(50*((s-working)/Math.max(.001,close-working)),0,50);
+}
 function syncDesktopZoomSlider() {
-  const slider = $("#desktopZoomRange");
-  if (!slider) return;
-  slider.value = String(clamp(Number(state.camera.scale || .85), .28, 1.8));
-  const min = Number(slider.min || .28), max = Number(slider.max || 1.8);
-  const ratio = clamp((Number(slider.value) - min) / Math.max(.001, max - min), 0, 1);
-  slider.style.setProperty("--zoom-progress", `${ratio * 100}%`);
+  const slider=$("#desktopZoomRange"); if(!slider)return;
+  const value=scaleToSemanticValue(state.camera.scale);
+  slider.value=String(Math.round(value));
+  slider.style.setProperty("--zoom-progress",`${((value+50)/100)*100}%`);
+  slider.setAttribute("aria-valuetext",value<=-45?"Вся картина":value>=45?"Крупный режим":Math.abs(value)<=4?"Рабочий режим":value<0?"Обзор":"Увеличение");
 }
 function handleDesktopZoomInput(event) {
   setZoomInteraction(true);
-  const nextScale = clamp(Number(event.currentTarget.value || state.camera.scale), .28, 1.8);
-  const viewport = $("#canvasViewport");
-  const rect = viewport.getBoundingClientRect();
-  const anchorX = rect.width / 2;
-  const usableBottom = Math.max(0, rect.height - 170);
-  const anchorY = Math.max(80, usableBottom / 2);
-  const worldAnchorX = (anchorX - state.camera.tx) / Math.max(.001, state.camera.scale);
-  const worldAnchorY = (anchorY - state.camera.ty) / Math.max(.001, state.camera.scale);
-  state.camera.scale = nextScale;
-  state.camera.tx = anchorX - worldAnchorX * nextScale;
-  state.camera.ty = anchorY - worldAnchorY * nextScale;
-  applyCamera();
+  const semantic=clamp(Number(event.currentTarget.value||0),-50,50);
+  if(semantic<=-49){fitAll(false);return;}
+  const nextScale=semanticValueToScale(semantic);
+  const viewport=$("#canvasViewport"), rect=viewport.getBoundingClientRect();
+  const anchorX=rect.width/2, anchorY=Math.max(92,(rect.height-190)/2);
+  const worldAnchorX=(anchorX-state.camera.tx)/Math.max(.001,state.camera.scale);
+  const worldAnchorY=(anchorY-state.camera.ty)/Math.max(.001,state.camera.scale);
+  state.camera.scale=nextScale;
+  state.camera.tx=anchorX-worldAnchorX*nextScale;
+  state.camera.ty=anchorY-worldAnchorY*nextScale;
+  keepCameraNumericallySafe();applyCamera();
 }
 function rememberWorkingNode(node) {
   if (!node || node.archived) return;
@@ -1232,7 +1263,7 @@ function focusNodes(nodes) {
 }
 function centerCamera() {
   const rect = $("#canvasViewport").getBoundingClientRect();
-  state.camera.scale = .85;
+  state.camera.scale = .88;
   state.camera.tx = rect.width / 2 - WORLD_W / 2 * state.camera.scale;
   state.camera.ty = rect.height / 2 - WORLD_H / 2 * state.camera.scale;
   applyCamera();
@@ -1247,13 +1278,15 @@ function fitAll(animate = true) {
     maxX = Math.max(maxX, node.x + dim.w); maxY = Math.max(maxY, node.y + dim.h);
   });
   const rect = $("#canvasViewport").getBoundingClientRect();
-  const availableH = rect.height - 150;
-  const pad = 100;
-  const scale = clamp(Math.min((rect.width - 30) / (maxX - minX + pad * 2), availableH / (maxY - minY + pad * 2)), .34, 1.25);
+  const topInset = 82;
+  const bottomInset = 190;
+  const availableH = Math.max(260, rect.height - topInset - bottomInset);
+  const pad = 90;
+  const scale = clamp(Math.min((rect.width - 44) / (maxX - minX + pad * 2), availableH / (maxY - minY + pad * 2)), .24, 1.12);
   if (animate) $("#world").style.transition = "transform .45s cubic-bezier(.2,.78,.2,1)";
   state.camera.scale = scale;
   state.camera.tx = rect.width / 2 - ((minX + maxX) / 2) * scale;
-  state.camera.ty = (rect.height - 20) / 2 - ((minY + maxY) / 2) * scale;
+  state.camera.ty = 82 + availableH / 2 - ((minY + maxY) / 2) * scale;
   applyCamera();
   if (animate) setTimeout(() => $("#world").style.transition = "", 480);
 }
@@ -1294,8 +1327,8 @@ function cameraSafetyLimits(scale = state.camera.scale) {
   // The desktop is intentionally almost free-moving. These limits exist only
   // as a distant numerical safety net and never depend on the visible cards.
   // This prevents the "invisible wall" effect, especially at small zoom.
-  const spanX = Math.max(7200, WORLD_W * Math.max(.55, scale) + rect.width * 5);
-  const spanY = Math.max(5600, WORLD_H * Math.max(.55, scale) + rect.height * 5);
+  const spanX = Math.max(24000, WORLD_W * Math.max(.4, scale) + rect.width * 12);
+  const spanY = Math.max(20000, WORLD_H * Math.max(.4, scale) + rect.height * 12);
   return { minTx: -spanX, maxTx: spanX, minTy: -spanY, maxTy: spanY };
 }
 function keepCameraNumericallySafe() {
@@ -1701,8 +1734,14 @@ function createProcessForProject(project) {
 }
 function createBranchFor(node) {
   state.selectedId = node.id;
-  if (node.type === "project") return createProcessForProject(node);
-  renderCreateActions(); showOverlay("createMenu");
+  const dialog=$("#detailDialog");
+  if(dialog?.open) dialog.close();
+  state.activeNodeId=null;
+  renderCards();
+  requestAnimationFrame(()=>{
+    if(node.type==="project") createProcessForProject(node);
+    else { renderCreateActions(); showOverlay("createMenu"); }
+  });
 }
 
 /* Details */
@@ -1750,7 +1789,8 @@ function projectDetailHtml(node) {
     </div>`;
 }
 function normalizedProcessCoverPositions(source) {
-  const legacy = source?.coverPosition || { x: 0, y: 0, scale: 1 };
+  const defaultFit = source?.type === "person" ? "contain" : "cover";
+  const legacy = { x: 0, y: 0, scale: 1, fit: defaultFit, ...(source?.coverPosition || {}) };
   const positions = source?.coverPositions || {};
   return {
     "1": { ...legacy, ...(positions["1"] || {}) },
@@ -1759,15 +1799,16 @@ function normalizedProcessCoverPositions(source) {
   };
 }
 function processCoverPosition(node, mode = "2") {
-  return normalizedProcessCoverPositions(node)[String(mode)] || { x: 0, y: 0, scale: 1 };
+  return normalizedProcessCoverPositions(node)[String(mode)] || { x: 0, y: 0, scale: 1, fit: node?.type === "person" ? "contain" : "cover" };
 }
 function processCoverStyle(position) {
-  const scale = Math.max(1, Number(position?.scale || 1));
+  const fit = position?.fit === "contain" ? "contain" : "cover";
+  const scale = Math.max(.65, Number(position?.scale || 1));
   const x = clamp(Number(position?.x || 0), -50, 50);
   const y = clamp(Number(position?.y || 0), -50, 50);
   const objectX = clamp(50 + x, 0, 100);
   const objectY = clamp(50 + y, 0, 100);
-  return `object-fit:cover !important;object-position:${objectX}% ${objectY}% !important;transform:scale(${scale});transform-origin:center center`;
+  return `object-fit:${fit} !important;object-position:${objectX}% ${objectY}% !important;transform:scale(${scale});transform-origin:center center`;
 }
 function processCoverMediaHtml(node) {
   if (!node.coverAssetId) return "";
@@ -2328,8 +2369,9 @@ async function handleProcessCoverFile(event) {
   state.editDraft.assets.push(metadata);
   if (state.quickCoverNodeId) state.quickCoverPendingAssetId = id;
   state.editDraft.coverAssetId = id;
-  state.editDraft.coverPosition = { x: 0, y: 0, scale: 1 };
-  state.editDraft.coverPositions = normalizedProcessCoverPositions({});
+  const defaultFit = state.editDraft.type === "person" ? "contain" : "cover";
+  state.editDraft.coverPosition = { x: 0, y: 0, scale: 1, fit: defaultFit };
+  state.editDraft.coverPositions = normalizedProcessCoverPositions({ type: state.editDraft.type, coverPosition: state.editDraft.coverPosition });
   if (state.quickCoverNodeId) openProcessCoverPositionDialog(id);
   else { renderEditorBody(); openProcessCoverPositionDialog(id); }
 }
@@ -2353,20 +2395,28 @@ function setProcessCoverMode(mode) {
   const frame = $("#processCoverFrame"); frame.className = `cover-position-frame mode-${state.coverPositionMode}`;
   const position = currentProcessCoverPosition();
   $("#processCoverScale").value = position.scale || 1;
+  $$('[data-cover-fit]', $("#processCoverDialog")).forEach(button=>button.classList.toggle("active",button.dataset.coverFit===(position.fit||"cover")));
   updateProcessCoverPreview();
 }
 function updateProcessCoverPreview() {
   const position = currentProcessCoverPosition(); if (!position) return;
-  position.scale = Math.max(1, Number($("#processCoverScale").value || 1));
+  position.scale = Math.max(.65, Number($("#processCoverScale").value || 1));
   position.x = clamp(Number(position.x || 0), -50, 50);
   position.y = clamp(Number(position.y || 0), -50, 50);
   const preview = $("#processCoverPreview");
   preview.style.cssText = processCoverStyle(position);
 }
+function setProcessCoverFit(fit) {
+  const position=currentProcessCoverPosition(); if(!position)return;
+  position.fit=fit==="contain"?"contain":"cover";
+  $$('[data-cover-fit]', $("#processCoverDialog")).forEach(button=>button.classList.toggle("active",button.dataset.coverFit===position.fit));
+  updateProcessCoverPreview();
+}
 function resetProcessCoverPosition() {
   if (!state.coverPositionDraft) return;
-  state.coverPositionDraft[state.coverPositionMode] = { x: 0, y: 0, scale: 1 };
-  $("#processCoverScale").value = 1; updateProcessCoverPreview();
+  const fit = state.editDraft?.type === "person" ? "contain" : "cover";
+  state.coverPositionDraft[state.coverPositionMode] = { x: 0, y: 0, scale: 1, fit };
+  $("#processCoverScale").value = 1; setProcessCoverFit(fit); updateProcessCoverPreview();
 }
 function finishCoverDialogClose(){
   const dialog=$("#processCoverDialog");
