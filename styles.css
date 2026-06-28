@@ -984,3 +984,76 @@ html[data-theme="light"] .desktop-zoom-slider input[type=range]::-webkit-slider-
 .link-flow-overlay.comet-tail-4{stroke-width:.75;stroke-dasharray:54 946;opacity:.11;filter:none}
 @keyframes cometFlowForward{from{stroke-dashoffset:calc(1000 + var(--comet-lag,0))}to{stroke-dashoffset:calc(0 + var(--comet-lag,0))}}
 @keyframes cometFlowReverse{from{stroke-dashoffset:calc(0 - var(--comet-lag,0))}to{stroke-dashoffset:calc(1000 - var(--comet-lag,0))}}
+
+/* v6.0.42 — goal photo, link performance and softer comet */
+.goal-photo-thumb{
+  width:118px;
+  height:86px;
+  border-radius:20px;
+  overflow:hidden;
+  border:1px solid rgba(113,128,165,.42);
+  background:#121724;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.025);
+}
+.goal-photo-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+
+/* Fewer animated SVG elements and lighter effects during gestures. */
+.canvas-viewport.is-panning .link-flow-overlay,
+.canvas-viewport.is-zooming .link-flow-overlay{
+  animation-play-state:paused!important;
+  filter:none!important;
+  opacity:.26!important;
+}
+.canvas-viewport.is-panning .link-path,
+.canvas-viewport.is-zooming .link-path{
+  filter:none!important;
+}
+.canvas-viewport.is-zooming .node-card{
+  filter:none!important;
+}
+
+/* Soft tapered comet: rounded leading edge, no detached ball, and a long dissolving tail. */
+.link-flow-overlay{
+  fill:none;
+  stroke:url(#linkPulseGradient);
+  stroke-linecap:round;
+  pointer-events:none;
+  will-change:stroke-dashoffset;
+  animation-duration:6.6s!important;
+  animation-timing-function:linear!important;
+  animation-iteration-count:infinite!important;
+  animation-name:cometFlowForward!important;
+}
+.link-flow-overlay.reverse{animation-name:cometFlowReverse!important}
+.link-flow-overlay.comet-head{
+  stroke-width:4.15!important;
+  stroke-dasharray:58 942!important;
+  opacity:.72!important;
+  filter:drop-shadow(0 0 3px rgba(157,183,255,.32)) drop-shadow(0 0 7px rgba(91,209,235,.12))!important;
+}
+.link-flow-overlay.comet-body{
+  stroke-width:3.2!important;
+  stroke-dasharray:74 926!important;
+  opacity:.52!important;
+  filter:drop-shadow(0 0 3px rgba(104,157,255,.14))!important;
+}
+.link-flow-overlay.comet-tail-near{
+  stroke-width:2.35!important;
+  stroke-dasharray:86 914!important;
+  opacity:.34!important;
+  filter:drop-shadow(0 0 2px rgba(102,153,255,.09))!important;
+}
+.link-flow-overlay.comet-tail-mid{
+  stroke-width:1.45!important;
+  stroke-dasharray:96 904!important;
+  opacity:.19!important;
+  filter:none!important;
+}
+.link-flow-overlay.comet-tail-far{
+  stroke-width:.65!important;
+  stroke-dasharray:110 890!important;
+  opacity:.07!important;
+  filter:none!important;
+}
+@keyframes cometFlowForward{from{stroke-dashoffset:calc(1000 + var(--comet-lag,0))}to{stroke-dashoffset:calc(0 + var(--comet-lag,0))}}
+@keyframes cometFlowReverse{from{stroke-dashoffset:calc(0 - var(--comet-lag,0))}to{stroke-dashoffset:calc(1000 - var(--comet-lag,0))}}to{stroke-dashoffset:calc(1000 - var(--comet-lag,0))}}

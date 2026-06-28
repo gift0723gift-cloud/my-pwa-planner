@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.40";
+const VERSION = "6.0.42";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -144,6 +144,9 @@ const state = {
   linkFlowGesture: null,
   linkFlow: null,
   linkMenuId: null,
+  linkRenderFrame: 0,
+  zoomIdleTimer: 0,
+  dotRenderFrame: 0,
   linkDirectionModeId: null,
   lastLinkTap: { id: null, time: 0 },
   undoStack: [],
@@ -529,6 +532,15 @@ function bindWorkspaceOnce() {
   window.addEventListener("pointermove", handleLinkPointerMove, { passive: false });
   window.addEventListener("pointerup", finishLinkPointerDrag, { passive: false });
   window.addEventListener("pointercancel", finishLinkPointerDrag, { passive: false });
+  window.addEventListener("pointerup", event => {
+    if (state.canvasPointers.has(event.pointerId)) onCanvasPointerEnd(event);
+  }, { passive: false });
+  window.addEventListener("pointercancel", event => {
+    if (state.canvasPointers.has(event.pointerId)) onCanvasPointerEnd(event);
+    resetAllTransientGestures();
+  }, { passive: false });
+  window.addEventListener("blur", resetAllTransientGestures);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) resetAllTransientGestures(); });
   $("#detailEditButton").addEventListener("click", () => {
     const node = nodeById(state.activeNodeId); if (node) openEditor(node);
   });
@@ -755,8 +767,23 @@ async function hydrateCardCovers() {
     }
   }
 }
+function scheduleRenderLinks() {
+  if (state.linkRenderFrame) return;
+  state.linkRenderFrame = requestAnimationFrame(() => {
+    state.linkRenderFrame = 0;
+    renderLinks();
+  });
+}
+function setZoomInteraction(active = true) {
+  const viewport = $("#canvasViewport");
+  if (!viewport) return;
+  viewport.classList.toggle("is-zooming", active);
+  clearTimeout(state.zoomIdleTimer);
+  if (active) state.zoomIdleTimer = setTimeout(() => viewport.classList.remove("is-zooming"), 180);
+}
 function renderLinks() {
   const svg = $("#linkLayer");
+  const fragment = document.createDocumentFragment();
   svg.classList.toggle("link-editing", Boolean(state.selectedLinkId));
   svg.innerHTML = `<defs>
     <linearGradient id="linkGradient" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a14eff"/><stop offset=".55" stop-color="#6177ff"/><stop offset="1" stop-color="#55dcec"/></linearGradient>
@@ -780,7 +807,7 @@ function renderLinks() {
     hit.setAttribute("d", pathData);
     hit.setAttribute("class", "link-hit");
     hit.dataset.linkId = link.id;
-    svg.appendChild(hit);
+    fragment.appendChild(hit);
 
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", pathData);
@@ -788,16 +815,14 @@ function renderLinks() {
     const muted = state.selectedLinkId ? !selected : (state.selectedId ? !related : false);
     path.setAttribute("class", `link-path ${related ? "active" : ""} ${selected ? "selected" : ""} ${muted ? "muted" : ""} ${link.highlighted ? "highlighted" : ""}`);
     path.dataset.linkId = link.id;
-    svg.appendChild(path);
+    fragment.appendChild(path);
 
     if (link.flow && link.flow !== "none") {
       const cometSegments = [
-        { cls: "comet-tail-4", lag: 310 },
-        { cls: "comet-tail-3", lag: 250 },
-        { cls: "comet-tail-2", lag: 185 },
-        { cls: "comet-tail-1", lag: 120 },
-        { cls: "comet-body-2", lag: 68 },
-        { cls: "comet-body-1", lag: 28 },
+        { cls: "comet-tail-far", lag: 255 },
+        { cls: "comet-tail-mid", lag: 185 },
+        { cls: "comet-tail-near", lag: 112 },
+        { cls: "comet-body", lag: 48 },
         { cls: "comet-head", lag: 0 }
       ];
       const addPulse = reverse => {
@@ -807,7 +832,7 @@ function renderLinks() {
           pulse.setAttribute("pathLength", "1000");
           pulse.setAttribute("class", `link-flow-overlay ${segment.cls} ${reverse ? "reverse" : "forward"}`);
           pulse.style.setProperty("--comet-lag", String(segment.lag));
-          svg.appendChild(pulse);
+          fragment.appendChild(pulse);
         });
       };
       if (link.flow === "forward") addPulse(false);
@@ -819,17 +844,18 @@ function renderLinks() {
       const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       dot.setAttribute("cx", point.x); dot.setAttribute("cy", point.y); dot.setAttribute("r", selected ? "5" : "3");
       dot.setAttribute("class", `link-dot ${selected ? "selected" : ""}`);
-      svg.appendChild(dot);
+      fragment.appendChild(dot);
       if (selected) {
         const handle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
         handle.setAttribute("cx", point.x); handle.setAttribute("cy", point.y); handle.setAttribute("r", "14");
         handle.setAttribute("class", "link-end-handle");
         handle.dataset.linkId = link.id;
         handle.dataset.linkEnd = index === 0 ? "a" : "b";
-        svg.appendChild(handle);
+        fragment.appendChild(handle);
       }
     });
   });
+  svg.appendChild(fragment);
   updateLinkToolbar();
   updateLinkDropHighlight();
 }
@@ -842,11 +868,35 @@ function curveBetweenPoints(start, end) {
   const curve = clamp(Math.abs(dy) * .42, 60, 200) * (dy >= 0 ? 1 : -1);
   return `M ${start.x} ${start.y} C ${start.x} ${start.y + curve}, ${end.x} ${end.y - curve}, ${end.x} ${end.y}`;
 }
+function resetCanvasGestureState() {
+  cancelAnimationFrame(state.cameraInertiaFrame);
+  state.cameraInertiaFrame = 0;
+  state.canvasPointers.clear();
+  state.canvasGesture = null;
+  const viewport = $("#canvasViewport");
+  viewport?.classList.remove("is-panning", "is-zooming");
+  setZoomInteraction(false);
+}
+function resetLinkGestureState() {
+  state.linkFlowGesture = null;
+  state.linkDrag = null;
+  state.linkDropTargetId = null;
+  const viewport = $("#canvasViewport");
+  viewport?.classList.remove("is-panning", "is-zooming");
+  setZoomInteraction(false);
+}
+function resetAllTransientGestures() {
+  resetCanvasGestureState();
+  resetLinkGestureState();
+}
+
 function handleLinkPointerDown(event) {
   const handle = event.target.closest?.(".link-end-handle");
   const hit = event.target.closest?.(".link-hit,.link-path");
   if (!handle && !hit) return;
   event.preventDefault(); event.stopPropagation();
+  resetCanvasGestureState();
+  try { (handle || hit).setPointerCapture?.(event.pointerId); } catch (_) {}
   const linkId = (handle || hit).dataset.linkId;
   if (!linkId) return;
   const linkRecord = state.data.links.find(item => item.id === linkId);
@@ -875,7 +925,7 @@ function handleLinkPointerMove(event) {
     drag.point = screenToWorld(event.clientX, event.clientY);
     const target = findLinkDropTarget(drag.point, drag.fixedId);
     state.linkDropTargetId = target?.id || null;
-    renderLinks();
+    scheduleRenderLinks();
     return;
   }
   const flow = state.linkFlowGesture;
@@ -889,6 +939,8 @@ function finishLinkPointerDrag(event) {
   const flow = state.linkFlowGesture;
   if (flow && flow.pointerId === event.pointerId && !state.linkDrag) {
     state.linkFlowGesture = null;
+    setZoomInteraction(false);
+    $("#canvasViewport")?.classList.remove("is-panning", "is-zooming");
     const link = state.data.links.find(item => item.id === flow.linkId);
     if (!link) return;
     const lockedA = nodeById(link.a)?.locked, lockedB = nodeById(link.b)?.locked;
@@ -927,6 +979,8 @@ function finishLinkPointerDrag(event) {
         navigator.vibrate?.(8);
       }
     }
+    state.canvasPointers.clear();
+    state.canvasGesture = null;
     return;
   }
   const drag = state.linkDrag;
@@ -944,6 +998,9 @@ function finishLinkPointerDrag(event) {
     }
   } else if (link) toast("Связь оставлена без изменений");
   state.linkDrag = null; state.linkDropTargetId = null;
+  state.canvasPointers.clear(); state.canvasGesture = null;
+  setZoomInteraction(false);
+  $("#canvasViewport")?.classList.remove("is-panning", "is-zooming");
   renderCards(); renderLinks();
 }
 function findLinkDropTarget(point, fixedId) {
@@ -1028,7 +1085,7 @@ function applyCamera() {
   const world = $("#world");
   world.style.transform = `translate3d(${state.camera.tx}px,${state.camera.ty}px,0) scale(${state.camera.scale})`;
   syncDesktopZoomSlider();
-  drawDots();
+  if (!state.dotRenderFrame) state.dotRenderFrame = requestAnimationFrame(() => { state.dotRenderFrame = 0; drawDots(); });
 }
 function syncDesktopZoomSlider() {
   const slider = $("#desktopZoomRange");
@@ -1039,6 +1096,7 @@ function syncDesktopZoomSlider() {
   slider.style.setProperty("--zoom-progress", `${ratio * 100}%`);
 }
 function handleDesktopZoomInput(event) {
+  setZoomInteraction(true);
   const nextScale = clamp(Number(event.currentTarget.value || state.camera.scale), .28, 1.8);
   const viewport = $("#canvasViewport");
   const rect = viewport.getBoundingClientRect();
@@ -1206,6 +1264,8 @@ function startCameraInertia(vx,vy) {
 /* Gestures */
 function onCanvasPointerDown(event) {
   cancelAnimationFrame(state.cameraInertiaFrame); state.cameraInertiaFrame=0;
+  if (!event.isPrimary && state.canvasPointers.size > 2) resetCanvasGestureState();
+  if (state.linkFlowGesture || state.linkDrag) resetLinkGestureState();
   if (event.target.closest(".node-card,.canvas-utility,.gesture-hint,.link-hit,.link-end-handle,.link-toolbar")) return;
   event.preventDefault();
   event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -1237,6 +1297,7 @@ function onCanvasPointerMove(event) {
   } else if (state.canvasPointers.size >= 2) {
     const points = [...state.canvasPointers.values()].slice(0, 2);
     const center = midpoint(points[0], points[1]); const ratio = distance(points[0], points[1]) / Math.max(1, gesture.distance);
+    setZoomInteraction(true);
     state.camera.scale = clamp(gesture.scale * ratio, .28, 1.8);
     state.camera.tx = center.x - gesture.worldCenter.x * state.camera.scale;
     state.camera.ty = center.y - gesture.worldCenter.y * state.camera.scale;
@@ -1244,7 +1305,10 @@ function onCanvasPointerMove(event) {
   }
 }
 function onCanvasPointerEnd(event) {
-  if (!state.canvasPointers.has(event.pointerId)) return;
+  if (!state.canvasPointers.has(event.pointerId)) {
+    if (state.canvasPointers.size === 0) resetCanvasGestureState();
+    return;
+  }
   const gesture = state.canvasGesture;
   state.canvasPointers.delete(event.pointerId);
   if (state.canvasPointers.size === 0) {
@@ -1257,6 +1321,8 @@ function onCanvasPointerEnd(event) {
       if (state.linkCreateSourceId) { state.linkCreateSourceId = null; toast("Создание связи отменено"); }
       renderCards(); renderLinks();
     }
+    setZoomInteraction(false);
+    $("#canvasViewport")?.classList.remove("is-zooming");
     if (gesture?.type === "pan" && gesture.moved) startCameraInertia(gesture.vx || 0, gesture.vy || 0);
     else settleCameraBounds();
     state.canvasGesture = null;
@@ -1323,7 +1389,7 @@ function attachCardGestures(element, node) {
     if (gesture.type === "drag") {
       node.x = clamp(gesture.nodeX + dx, -1400, WORLD_W + 1400);
       node.y = clamp(gesture.nodeY + dy, -1000, WORLD_H + 1000);
-      element.style.left = `${node.x}px`; element.style.top = `${node.y}px`; renderLinks();
+      element.style.left = `${node.x}px`; element.style.top = `${node.y}px`; scheduleRenderLinks();
     }
   });
 
@@ -1991,14 +2057,18 @@ function openEditor(node) {
 }
 function closeEditor() { if ($("#editorDialog").open) $("#editorDialog").close(); state.editDraft = null; }
 function commonFields(draft) {
-  const processCover = (draft.type === "process" || draft.type === "person") ? processCoverEditorHtml(draft) : "";
+  const processCover = (["process","person","goal"].includes(draft.type)) ? processCoverEditorHtml(draft) : "";
   return `<div class="field"><label>Название</label><input name="title" value="${esc(draft.title)}" required></div>${processCover}<div class="field"><label>Заметка</label><textarea name="note">${esc(draft.note || "")}</textarea></div>`;
 }
 function processCoverEditorHtml(draft) {
   const hasCover = Boolean(draft.coverAssetId);
   const position = processCoverPosition(draft, "2");
   const isPerson = draft.type === "person";
-  return `<div class="field process-cover-field"><label>${isPerson ? "Фото" : "Обложка"}</label><div class="process-cover-editor">${hasCover ? `<div class="process-cover-thumb ${isPerson ? "person-photo-thumb" : ""}"><img data-editor-process-cover="${esc(draft.coverAssetId)}" style="${processCoverStyle(position)}" alt=""></div>` : `<div class="process-cover-empty">${isPerson ? "Фото не добавлено" : "Обложка не добавлена"}</div>`}<div class="process-cover-buttons"><button type="button" class="ghost" data-editor-action="newProcessCover">${isPerson ? "Добавить / заменить фото" : "Новая обложка"}</button><button type="button" class="ghost" data-editor-action="positionProcessCover" ${hasCover ? "" : "disabled"}>Настроить положение</button>${hasCover ? `<button type="button" class="ghost danger-text" data-editor-action="removeProcessCover">Удалить</button>` : ""}</div></div></div>`;
+  const isGoal = draft.type === "goal";
+  const label = isPerson ? "Фото" : isGoal ? "Фото цели" : "Обложка";
+  const emptyText = isPerson ? "Фото не добавлено" : isGoal ? "Фото цели не добавлено" : "Обложка не добавлена";
+  const buttonText = isPerson || isGoal ? "Добавить / заменить фото" : "Новая обложка";
+  return `<div class="field process-cover-field"><label>${label}</label><div class="process-cover-editor">${hasCover ? `<div class="process-cover-thumb ${isPerson ? "person-photo-thumb" : isGoal ? "goal-photo-thumb" : ""}"><img data-editor-process-cover="${esc(draft.coverAssetId)}" style="${processCoverStyle(position)}" alt=""></div>` : `<div class="process-cover-empty">${emptyText}</div>`}<div class="process-cover-buttons"><button type="button" class="ghost" data-editor-action="newProcessCover">${buttonText}</button><button type="button" class="ghost" data-editor-action="positionProcessCover" ${hasCover ? "" : "disabled"}>Настроить положение</button>${hasCover ? `<button type="button" class="ghost danger-text" data-editor-action="removeProcessCover">Удалить</button>` : ""}</div></div></div>`;
 }
 function statusOptions(value) {
   return Object.entries(STATUS_LABELS).map(([key, label]) => `<option value="${key}" ${value === key ? "selected" : ""}>${label}</option>`).join("");
@@ -2082,7 +2152,7 @@ async function hydrateProcessCoverEditor() {
   const url = await assetUrl(img.dataset.editorProcessCover).catch(() => null); if (url && img.isConnected) img.src = url;
 }
 function removeProcessCoverFromDraft() {
-  if (!state.editDraft || !["process","person"].includes(state.editDraft.type)) return;
+  if (!state.editDraft || !["process","person","goal"].includes(state.editDraft.type)) return;
   const oldId = state.editDraft.coverAssetId;
   if (oldId) { state.editDraft._removedCoverId = oldId; state.editDraft.assets = (state.editDraft.assets || []).filter(asset => asset.id !== oldId); }
   state.editDraft.coverAssetId = ""; state.editDraft.coverPosition = { x: 0, y: 0, scale: 1 }; state.editDraft.coverPositions = normalizedProcessCoverPositions({}); renderEditorBody();
@@ -2165,7 +2235,7 @@ function startQuickPositionCover(){
 }
 async function handleProcessCoverFile(event) {
   const file = event.target.files?.[0]; event.target.value = "";
-  if (!file || !state.editDraft || !["process","person"].includes(state.editDraft.type)) return;
+  if (!file || !state.editDraft || !["process","person","goal"].includes(state.editDraft.type)) return;
   if (state.quickCoverNodeId) {
     const quickDialog = $("#coverQuickMenu");
     quickDialog.classList.remove("is-leaving");
@@ -2193,7 +2263,7 @@ async function openProcessCoverPositionDialog(assetId) {
   const url = await assetUrl(assetId).catch(() => null); if (!url) return;
   state.coverPositionDraft = normalizedProcessCoverPositions(state.editDraft || {});
   state.coverPositionMode = "2";
-  const title = $("#processCoverDialog h2"); if (title) title.textContent = state.editDraft?.type === "person" ? "Настроить фото" : "Настроить обложку";
+  const title = $("#processCoverDialog h2"); if (title) title.textContent = state.editDraft?.type === "person" ? "Настроить фото" : state.editDraft?.type === "goal" ? "Настроить фото цели" : "Настроить обложку";
   $("#processCoverPreview").src = url;
   setProcessCoverMode("2");
   const dialog = $("#processCoverDialog"); if (!dialog.open) { dialog.showModal(); requestAnimationFrame(()=>dialog.classList.add("is-visible")); }
