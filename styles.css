@@ -1088,7 +1088,7 @@ html[data-theme="light"] .desktop-zoom-slider input[type=range]::-webkit-slider-
 .scrim{z-index:970}
 @media(max-width:390px){.node-card.medium[data-type="person"]{--cw:220px;--ch:220px}}
 
-/* v6.0.46 — compact photo cleanup, metric alignment and quiet entity actions */
+/* v6.0.47 — compact photo cleanup, metric alignment and quiet entity actions */
 .node-card.compact[data-type="person"] .card-shell,
 .node-card.compact[data-type="person"] .card-visual{
   background-color:#0d1119;
@@ -1160,3 +1160,63 @@ html[data-theme="light"] .desktop-zoom-slider input[type=range]::-webkit-slider-
 .node-card.medium[data-type="goal"].selected .card-content{
   padding-right:54px;
 }
+
+/* v6.0.47 — visible account menu, canonical metric rhythm, free canvas */
+.account-menu{
+  z-index:1005!important;
+  isolation:isolate;
+  filter:none!important;
+  opacity:1!important;
+  visibility:visible;
+}
+.account-menu.hidden{display:none!important}
+.scrim{z-index:970!important}
+
+/* Idea and Goal use the same metric rhythm as Project and Process. */
+.node-card.medium[data-type="idea"] .card-content,
+.node-card.medium[data-type="goal"] .card-content{
+  position:relative;
+  height:auto;
+  padding:11px 13px 12px;
+}
+.node-card.medium[data-type="idea"] .card-metrics,
+.node-card.medium[data-type="goal"] .card-metrics{
+  position:static;
+  left:auto;
+  bottom:auto;
+  margin-top:9px;
+  align-items:center;
+  gap:5px;
+}
+.node-card.medium[data-type="idea"] .metric,
+.node-card.medium[data-type="goal"] .metric{
+  min-height:24px;
+  padding:0 7px;
+}
+.node-card.medium[data-type="idea"] .card-progress,
+.node-card.medium[data-type="goal"] .card-progress{
+  margin-top:9px;
+}
+
+
+/* v6.0.48 — Я сейчас: visible focus panel and quick completion */
+.today-action{font-size:0}
+.today-action span{display:grid;place-items:center;width:30px;height:30px}
+.today-action svg{width:27px;height:27px;stroke-width:1.65;filter:drop-shadow(0 0 8px rgba(107,125,255,.28))}
+.side-panel{z-index:1010!important;isolation:isolate;filter:none!important;opacity:1!important;visibility:visible}
+.side-panel.hidden{display:none!important}
+.side-panel.now-panel{min-height:min(76vh,720px);max-height:88vh;padding:10px 16px calc(24px + var(--safe-bottom));background:linear-gradient(180deg,rgba(20,25,37,.99),rgba(9,12,19,.995))}
+.side-panel.now-panel header{position:sticky;top:-10px;z-index:3;padding:12px 0 12px;background:linear-gradient(180deg,#141925 72%,rgba(20,25,37,0))}
+.now-summary{display:flex;align-items:center;gap:12px;padding:14px;border:1px solid #30394d;border-radius:19px;background:linear-gradient(145deg,#1a2030,#111620);margin-bottom:14px}
+.now-summary>span{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(135deg,var(--purple),var(--blue) 55%,var(--cyan));font-size:16px;font-weight:800;box-shadow:0 8px 24px rgba(83,111,255,.25)}
+.now-summary div{min-width:0}.now-summary b{display:block;font-size:14px}.now-summary small{display:block;margin-top:3px;color:var(--muted);font-size:10px;line-height:1.35}
+.now-group{margin:0 0 15px}.now-group h3{display:flex;align-items:center;gap:7px;margin:0 3px 8px;color:#dce3f1;font-size:11px;letter-spacing:.12em;text-transform:uppercase}.now-group h3 span{min-width:22px;height:22px;padding:0 6px;border-radius:999px;display:grid;place-items:center;background:#242b3b;color:#9fa9bc;font-size:9px;letter-spacing:0}
+.now-list{display:grid;gap:8px}.now-task{position:relative;display:grid;grid-template-columns:42px minmax(0,1fr) 10px;align-items:center;gap:10px;min-height:68px;padding:10px 12px;border:1px solid #293247;border-radius:18px;background:linear-gradient(145deg,#171d2a,#10151f);box-shadow:0 8px 22px rgba(0,0,0,.22)}
+.now-task::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:0 4px 4px 0;background:#6a78ff;opacity:.65}.now-task.priority-high::before{background:#ff7588}.now-task.priority-low::before{background:#62dbe8}
+.now-check{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:#202737;border:1px solid #354059;color:#dbe3f2}.now-check:active{transform:scale(.94)}.now-check svg{width:21px;height:21px}
+.now-task-main{min-width:0;text-align:left}.now-task-main b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;line-height:1.25}.now-task-main small{display:block;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#8f99ac;font-size:9.5px}
+.now-priority{width:8px;height:8px;border-radius:50%;background:#8d98ad;box-shadow:0 0 8px rgba(141,152,173,.4)}.priority-high .now-priority{background:#ff7588;box-shadow:0 0 9px rgba(255,117,136,.55)}.priority-low .now-priority{background:#62dbe8;box-shadow:0 0 9px rgba(98,219,232,.5)}
+.now-empty{min-height:46vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:#8993a7}.now-empty>span{width:66px;height:66px;border-radius:22px;display:grid;place-items:center;background:#171d29;border:1px solid #303a4e;color:#aab8d3;margin-bottom:16px}.now-empty svg{width:34px;height:34px}.now-empty b{color:#e9edf6;font-size:16px}.now-empty p{max-width:260px;margin:7px 0 0;font-size:11px;line-height:1.45}
+html[data-theme="light"] .side-panel.now-panel{background:linear-gradient(180deg,#ffffff,#f3f5f9)}
+html[data-theme="light"] .side-panel.now-panel header{background:linear-gradient(180deg,#fff 72%,rgba(255,255,255,0))}
+html[data-theme="light"] .now-task,html[data-theme="light"] .now-summary{background:#fff;border-color:#d7deea;box-shadow:0 8px 22px rgba(74,86,111,.09)}

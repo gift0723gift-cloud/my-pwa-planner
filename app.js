@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.46";
+const VERSION = "6.0.48";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -56,6 +56,7 @@ function icon(name, className = "") {
   const paths = {
     tree: `<path d="M5 5h5v5H5zM14 4h5v5h-5zM9 15h6v5H9z"/><path d="M7.5 10v2.2c0 1 .8 1.8 1.8 1.8H12m4.5-5v3.2c0 1-.8 1.8-1.8 1.8H12"/>`,
     today: `<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5l3.5 2"/>`,
+    nowMe: `<circle cx="12" cy="7.2" r="2.5"/><path d="M7.7 20v-4.6c0-2.4 1.9-4.3 4.3-4.3s4.3 1.9 4.3 4.3V20"/><path d="M7.8 12.2 4.2 8.7M16.2 12.2l3.6-3.5M4.2 8.7V5.4M19.8 8.7V5.4"/>`,
     results: `<path d="M6 19V9m6 10V5m6 14v-7"/><path d="m5 7 4-3 3 2 6-4"/>`,
     archive: `<path d="M4 7h16v3H4zM6 10v9h12v-9M9 14h6"/>`,
     archiveSend: `<path d="M4 7h16v3H4zM6 10v9h12v-9M9 15h6"/><path d="M12 3v7m0 0-3-3m3 3 3-3"/>`,
@@ -1494,8 +1495,8 @@ function attachCardGestures(element, node) {
       if (!node.locked) { gesture.type = "drag"; element.classList.add("dragging"); }
     }
     if (gesture.type === "drag") {
-      node.x = clamp(gesture.nodeX + dx, -1400, WORLD_W + 1400);
-      node.y = clamp(gesture.nodeY + dy, -1000, WORLD_H + 1000);
+      node.x = clamp(gesture.nodeX + dx, -12000, WORLD_W + 12000);
+      node.y = clamp(gesture.nodeY + dy, -12000, WORLD_H + 12000);
       element.style.left = `${node.x}px`; element.style.top = `${node.y}px`; scheduleRenderLinks();
     }
   });
@@ -1669,7 +1670,7 @@ function findFreePosition(type, preferred) {
     return pos.x+dims.w+gap < n.x || pos.x > n.x+d.w+gap || pos.y+dims.h+gap < n.y || pos.y > n.y+d.h+gap;
   });
   const found = candidates.find(clear) || candidates[0];
-  return { x: clamp(found.x, -1200, WORLD_W + 1200), y: clamp(found.y, -900, WORLD_H + 900) };
+  return { x: clamp(found.x, -12000, WORLD_W + 12000), y: clamp(found.y, -12000, WORLD_H + 12000) };
 }
 function offerNewCardSetup(node) {
   setTimeout(() => {
@@ -2668,20 +2669,67 @@ async function deleteCurrentAsset() {
 /* Panels */
 function openPanel(panel) {
   $$('.bottom-nav button').forEach(button => button.classList.toggle("active", button.dataset.panel === panel));
-  const titles = { today: "Сегодня", results: "Результаты", archive: "Архив" };
-  $("#panelTitle").textContent = titles[panel]; $("#panelEyebrow").textContent = state.space === "work" ? "ПРОЕКТЫ" : "ЛИЧНОЕ";
+  const titles = { today: "Я сейчас", results: "Результаты", archive: "Архив" };
+  $("#panelTitle").textContent = titles[panel];
+  $("#panelEyebrow").textContent = panel === "today" ? "МОЙ ТЕКУЩИЙ ФОКУС" : (state.space === "work" ? "ПРОЕКТЫ" : "ЛИЧНОЕ");
   $("#panelBody").innerHTML = panel === "today" ? todayPanelHtml() : panel === "results" ? resultsPanelHtml() : archivePanelHtml();
+  $("#sidePanel").classList.toggle("now-panel", panel === "today");
   showOverlay("sidePanel");
 }
+function taskFocusDate(task) {
+  const raw = task.dateTime || task.due || task.intervalStart || "";
+  if (!raw) return null;
+  const date = new Date(raw.length === 10 ? `${raw}T23:59:00` : raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+function taskFocusBucket(task, now = new Date()) {
+  const date = taskFocusDate(task);
+  if (!date) return 3;
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrowStart = new Date(todayStart); tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+  const nearEnd = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+  if (date < now) return 0;
+  if (date < tomorrowStart) return 1;
+  if (date <= nearEnd) return 2;
+  return 3;
+}
+function taskFocusDateLabel(task) {
+  const date = taskFocusDate(task);
+  if (!date) return "Без срока";
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const days = Math.round((target - today) / 86400000);
+  const time = task.dateTime ? new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" }).format(date) : "";
+  if (days < 0) return `Просрочено${time ? ` · ${time}` : ""}`;
+  if (days === 0) return `Сегодня${time ? ` · ${time}` : ""}`;
+  if (days === 1) return `Завтра${time ? ` · ${time}` : ""}`;
+  return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short" }).format(date);
+}
 function todayPanelHtml() {
-  const today = todayISO(); const entries = [];
-  state.data.nodes.filter(node => node.space === state.space && !node.archived).forEach(node => {
-    if (node.type === "process") (node.tasks || []).filter(task => !task.archived && !task.done && task.due === today).forEach(task => entries.push({ node, task }));
-    if (node.type === "goal" && node.deadline === today) entries.push({ node, task: { title: node.title, due: today } });
-    if (node.type === "project" && node.deadline === today) entries.push({ node, task: { title: `Срок проекта: ${node.title}`, due: today } });
+  const entries = [];
+  const priorityRank = { high: 0, medium: 1, low: 2 };
+  state.data.nodes.filter(node => node.space === state.space && !node.archived && node.type === "process").forEach(node => {
+    const project = node.projectId ? nodeById(node.projectId) : null;
+    (node.tasks || []).filter(task => !task.archived && !task.done).forEach(task => {
+      entries.push({ node, project, task, bucket: taskFocusBucket(task), date: taskFocusDate(task) });
+    });
   });
-  if (!entries.length) return `<div class="panel-empty">На сегодня нет обязательных действий.</div>`;
-  return entries.map(({ node, task }) => `<button class="panel-card" data-panel-open-node="${node.id}"><div class="panel-card-head"><b>${esc(task.title)}</b><span class="panel-chip">${esc(TYPE_LABELS[node.type])}</span></div><p>${esc(node.title)}</p></button>`).join("");
+  entries.sort((a, b) => a.bucket - b.bucket || (priorityRank[a.task.priority] ?? 1) - (priorityRank[b.task.priority] ?? 1) || (a.date?.getTime() ?? Infinity) - (b.date?.getTime() ?? Infinity));
+  if (!entries.length) return `<div class="now-empty"><span>${icon("nowMe")}</span><b>Сейчас всё выполнено</b><p>Новые приоритетные задачи появятся здесь автоматически.</p></div>`;
+  const labels = ["Сейчас", "Сегодня", "Ближайшее", "Дальше"];
+  return `<div class="now-summary"><span>${entries.length}</span><div><b>Что делать сейчас</b><small>Задачи из всех рабочих процессов в порядке приоритета</small></div></div>` + labels.map((label, bucket) => {
+    const group = entries.filter(entry => entry.bucket === bucket);
+    if (!group.length) return "";
+    return `<section class="now-group"><h3>${label}<span>${group.length}</span></h3><div class="now-list">${group.map(({node, project, task}) => `<article class="now-task priority-${esc(task.priority || "medium")}">
+      <button type="button" class="now-check" data-now-toggle="${esc(task.id)}" data-now-node="${esc(node.id)}" aria-label="Отметить выполненной"><span>${icon("task")}</span></button>
+      <button type="button" class="now-task-main" data-panel-open-node="${esc(node.id)}">
+        <b>${esc(task.title || "Задача без названия")}</b>
+        <small>${esc(project?.title || node.title)} · ${esc(taskFocusDateLabel(task))}</small>
+      </button>
+      <i class="now-priority" aria-label="${esc(priorityLabel(task.priority))}"></i>
+    </article>`).join("")}</div></section>`;
+  }).join("");
 }
 function resultsPanelHtml() {
   const entries = [];
@@ -2707,6 +2755,28 @@ function archivePanelHtml() {
   }).join("");
 }
 function handlePanelClick(event) {
+  const toggleNow = event.target.closest("[data-now-toggle]");
+  if (toggleNow) {
+    const node = nodeById(toggleNow.dataset.nowNode);
+    const task = node?.type === "process" ? (node.tasks || []).find(item => item.id === toggleNow.dataset.nowToggle) : null;
+    if (!task) return;
+    task.done = true;
+    task.completedAt = new Date().toISOString();
+    updateProcessProgress(node);
+    saveData();
+    $("#panelBody").innerHTML = todayPanelHtml();
+    render();
+    navigator.vibrate?.(12);
+    toast("Задача выполнена", "Отменить", () => {
+      task.done = false;
+      task.completedAt = "";
+      updateProcessProgress(node);
+      saveData();
+      if (!$("#sidePanel").classList.contains("hidden")) $("#panelBody").innerHTML = todayPanelHtml();
+      render();
+    });
+    return;
+  }
   const open = event.target.closest("[data-panel-open-node]"); if (open) { const node = nodeById(open.dataset.panelOpenNode); closeOverlays(); if (node) { state.selectedId = node.id; state.selectedLinkId = null; render(); focusNode(node); setTimeout(() => openDetail(node), 350); } }
   const restore = event.target.closest("[data-restore-node]"); if (restore) { const node = nodeById(restore.dataset.restoreNode); if (node) { pushUndo("Восстановление карточки"); node.archived = false; node.archivedAt = ""; saveData(); $("#panelBody").innerHTML = archivePanelHtml(); render(); toast("Карточка восстановлена", "Отменить", undoLast); } }
   const remove = event.target.closest("[data-delete-node]"); if (remove) { const node = nodeById(remove.dataset.deleteNode); if (node && confirm(`Удалить карточку «${node.title || "Без названия"}» навсегда? Все её связи будут удалены.`)) { permanentlyDeleteNode(node); $("#panelBody").innerHTML = archivePanelHtml(); render(); toast("Карточка удалена навсегда"); } }
