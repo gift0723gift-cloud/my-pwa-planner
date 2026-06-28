@@ -1,47 +1,70 @@
-const VERSION = "6.0.50";
-const CACHE = `boonwave-clean-${VERSION}`;
+const VERSION = "6.0.60";
+const CACHE = `boonwave-${VERSION}`;
 const CORE = [
   "./",
   "./index.html",
-  "./styles.css?v=6.0.50",
-  "./app.js?v=6.0.50",
+  "./styles.v6.0.60.css",
+  "./app.v6.0.60.js",
   "./manifest.webmanifest",
   "./boonwave-mark-full.png",
   "./icon-192.png",
   "./icon-512.png"
 ];
+
 self.addEventListener("install", event => {
   self.skipWaiting();
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(CORE)));
 });
+
 self.addEventListener("activate", event => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key)));
+    await Promise.all(
+      keys
+        .filter(key => key.startsWith("boonwave-") && key !== CACHE)
+        .map(key => caches.delete(key))
+    );
     await self.clients.claim();
   })());
 });
+
 self.addEventListener("fetch", event => {
   const request = event.request;
   if (request.method !== "GET") return;
-  if (request.mode === "navigate") {
+
+  const url = new URL(request.url);
+  const networkFirst = request.mode === "navigate" || /(?:index\.html|app\.v|styles\.v|sw\.js)$/.test(url.pathname);
+
+  if (networkFirst) {
     event.respondWith((async () => {
       try {
         const response = await fetch(request, { cache: "no-store" });
-        const cache = await caches.open(CACHE); cache.put("./index.html", response.clone());
+        if (response.ok) {
+          const cache = await caches.open(CACHE);
+          cache.put(request, response.clone());
+        }
         return response;
       } catch {
-        return (await caches.match("./index.html")) || (await caches.match("./"));
+        return (await caches.match(request)) ||
+               (await caches.match("./index.html")) ||
+               (await caches.match("./"));
       }
     })());
     return;
   }
+
   event.respondWith((async () => {
     const cached = await caches.match(request);
-    const freshPromise = fetch(request, { cache: "no-store" }).then(async response => {
-      if (response.ok) { const cache = await caches.open(CACHE); cache.put(request, response.clone()); }
+    if (cached) return cached;
+    try {
+      const response = await fetch(request, { cache: "no-store" });
+      if (response.ok) {
+        const cache = await caches.open(CACHE);
+        cache.put(request, response.clone());
+      }
       return response;
-    }).catch(() => null);
-    return cached || (await freshPromise) || new Response("Offline", { status: 503 });
+    } catch {
+      return new Response("Offline", { status: 503 });
+    }
   })());
 });
