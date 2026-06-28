@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.49";
+const VERSION = "6.0.50";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -2734,7 +2734,7 @@ function todayPanelHtml() {
     if (!group.length) return "";
     return `<section class="now-group"><h3>${label}<span>${group.length}</span></h3><div class="now-list">${group.map(({node, project, task}) => `<article class="now-task priority-${esc(task.priority || "medium")}">
       <button type="button" class="now-check" data-now-toggle="${esc(task.id)}" data-now-node="${esc(node.id)}" aria-label="Отметить выполненной"><span>${icon("task")}</span></button>
-      <button type="button" class="now-task-main" data-panel-open-node="${esc(node.id)}">
+      <button type="button" class="now-task-main" data-panel-open-node="${esc(node.id)}" data-panel-open-task="${esc(task.id)}">
         <b>${esc(task.title || "Задача без названия")}</b>
         <small>${esc(project?.title || node.title)} · ${esc(taskFocusDateLabel(task))}</small>
       </button>
@@ -2788,10 +2788,38 @@ function handlePanelClick(event) {
     });
     return;
   }
-  const open = event.target.closest("[data-panel-open-node]"); if (open) { const node = nodeById(open.dataset.panelOpenNode); closeOverlays(); if (node) { state.selectedId = node.id; state.selectedLinkId = null; render(); focusNode(node); setTimeout(() => openDetail(node), 350); } }
+  const open = event.target.closest("[data-panel-open-node]");
+  if (open) {
+    const node = nodeById(open.dataset.panelOpenNode);
+    const taskId = open.dataset.panelOpenTask || "";
+    const task = node?.type === "process" ? (node.tasks || []).find(item => item.id === taskId) : null;
+    closeOverlays();
+    if (node) {
+      if (task?.stageId) state.selectedProcessStageId = task.stageId;
+      state.selectedId = node.id;
+      state.selectedLinkId = null;
+      render();
+      focusNode(node);
+      setTimeout(() => {
+        openDetail(node);
+        if (taskId) setTimeout(() => highlightProcessTask(taskId), 120);
+      }, 350);
+    }
+  }
   const restore = event.target.closest("[data-restore-node]"); if (restore) { const node = nodeById(restore.dataset.restoreNode); if (node) { pushUndo("Восстановление карточки"); node.archived = false; node.archivedAt = ""; saveData(); $("#panelBody").innerHTML = archivePanelHtml(); render(); toast("Карточка восстановлена", "Отменить", undoLast); } }
   const remove = event.target.closest("[data-delete-node]"); if (remove) { const node = nodeById(remove.dataset.deleteNode); if (node && confirm(`Удалить карточку «${node.title || "Без названия"}» навсегда? Все её связи будут удалены.`)) { permanentlyDeleteNode(node); $("#panelBody").innerHTML = archivePanelHtml(); render(); toast("Карточка удалена навсегда"); } }
 }
+function highlightProcessTask(taskId) {
+  const input = document.querySelector(`[data-task-toggle="${CSS.escape(taskId)}"]`);
+  const card = input?.closest(".stage-task-card");
+  if (!card) return;
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  card.classList.remove("task-focus-flash");
+  void card.offsetWidth;
+  card.classList.add("task-focus-flash");
+  setTimeout(() => card.classList.remove("task-focus-flash"), 1500);
+}
+
 function permanentlyDeleteNode(node) {
   if (!node) return;
   const ids = new Set([node.id]);
