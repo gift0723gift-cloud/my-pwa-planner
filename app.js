@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.42";
+const VERSION = "6.0.43";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -1219,42 +1219,44 @@ function drawDots() {
   }
 }
 
-function cameraLimits(scale = state.camera.scale) {
+function cameraSafetyLimits(scale = state.camera.scale) {
   const rect = $("#canvasViewport").getBoundingClientRect();
-  const nodes = currentNodes();
-  if (!nodes.length) return { minTx: -WORLD_W * scale + rect.width * .8, maxTx: rect.width * .2, minTy: -WORLD_H * scale + rect.height * .75, maxTy: rect.height * .25 };
-  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
-  nodes.forEach(node => { const d=cardDims(node); minX=Math.min(minX,node.x); minY=Math.min(minY,node.y); maxX=Math.max(maxX,node.x+d.w); maxY=Math.max(maxY,node.y+d.h); });
-  const marginX=Math.max(180,rect.width*.38), marginY=Math.max(220,rect.height*.34);
-  return { minTx: rect.width-marginX-maxX*scale, maxTx: marginX-minX*scale, minTy: rect.height-marginY-maxY*scale, maxTy: marginY-minY*scale };
+  // The desktop is intentionally almost free-moving. These limits exist only
+  // as a distant numerical safety net and never depend on the visible cards.
+  // This prevents the "invisible wall" effect, especially at small zoom.
+  const spanX = Math.max(7200, WORLD_W * Math.max(.55, scale) + rect.width * 5);
+  const spanY = Math.max(5600, WORLD_H * Math.max(.55, scale) + rect.height * 5);
+  return { minTx: -spanX, maxTx: spanX, minTy: -spanY, maxTy: spanY };
 }
-function softenCameraBounds() {
-  const l=cameraLimits();
-  state.camera.tx=clamp(state.camera.tx,l.minTx,l.maxTx);
-  state.camera.ty=clamp(state.camera.ty,l.minTy,l.maxTy);
+function keepCameraNumericallySafe() {
+  const l = cameraSafetyLimits();
+  state.camera.tx = clamp(state.camera.tx, l.minTx, l.maxTx);
+  state.camera.ty = clamp(state.camera.ty, l.minTy, l.maxTy);
 }
 function settleCameraBounds() {
-  softenCameraBounds(); applyCamera();
+  keepCameraNumericallySafe();
+  applyCamera();
 }
 function startCameraInertia(vx,vy) {
   cancelAnimationFrame(state.cameraInertiaFrame);
-  const maxSpeed=.34;
+  const maxSpeed=.48;
   const speed=Math.hypot(vx,vy);
-  if(speed<.045){ settleCameraBounds(); return; }
+  if(speed<.035){ settleCameraBounds(); return; }
   if(speed>maxSpeed){ const k=maxSpeed/speed; vx*=k; vy*=k; }
   let last=performance.now();
   const step=now=>{
-    const dt=Math.min(24,now-last); last=now;
-    const l=cameraLimits();
-    const nextTx=state.camera.tx+vx*dt, nextTy=state.camera.ty+vy*dt;
-    const clampedTx=clamp(nextTx,l.minTx,l.maxTx), clampedTy=clamp(nextTy,l.minTy,l.maxTy);
-    if(clampedTx!==nextTx) vx=0;
-    if(clampedTy!==nextTy) vy=0;
-    state.camera.tx=clampedTx; state.camera.ty=clampedTy; applyCamera();
-    const friction=Math.pow(.84,dt/16.7); vx*=friction; vy*=friction;
-    if(Math.hypot(vx,vy)<.018){
+    const dt=Math.min(22,now-last); last=now;
+    state.camera.tx += vx * dt;
+    state.camera.ty += vy * dt;
+    keepCameraNumericallySafe();
+    applyCamera();
+    const friction=Math.pow(.89,dt/16.7); vx*=friction; vy*=friction;
+    if(Math.hypot(vx,vy)<.012){
       state.cameraInertiaFrame=0;
-      state.data.settings.cameras ||= {}; state.data.settings.cameras[state.space]=clone(state.camera); saveData(); return;
+      state.data.settings.cameras ||= {};
+      state.data.settings.cameras[state.space]=clone(state.camera);
+      saveData();
+      return;
     }
     state.cameraInertiaFrame=requestAnimationFrame(step);
   };
@@ -1293,7 +1295,7 @@ function onCanvasPointerMove(event) {
     gesture.vx=gesture.samples.reduce((sum,s,i)=>sum+s.vx*(i+1),0)/weight;
     gesture.vy=gesture.samples.reduce((sum,s,i)=>sum+s.vy*(i+1),0)/weight;
     gesture.lastX=event.clientX; gesture.lastY=event.clientY; gesture.lastT=now;
-    state.camera.tx = gesture.tx + dx; state.camera.ty = gesture.ty + dy; softenCameraBounds(); applyCamera();
+    state.camera.tx = gesture.tx + dx; state.camera.ty = gesture.ty + dy; keepCameraNumericallySafe(); applyCamera();
   } else if (state.canvasPointers.size >= 2) {
     const points = [...state.canvasPointers.values()].slice(0, 2);
     const center = midpoint(points[0], points[1]); const ratio = distance(points[0], points[1]) / Math.max(1, gesture.distance);
