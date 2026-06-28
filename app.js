@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.50";
+const VERSION = "6.0.51";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -156,7 +156,9 @@ const state = {
   focusOverview: false,
   cameraInertiaFrame: 0,
   lastSaveError: null,
-  activeInteraction: false
+  activeInteraction: false,
+  interactionWatchdog: 0,
+  capturedPointers: new Map()
 };
 
 function blankData() {
@@ -330,6 +332,29 @@ function cardDims(node) {
 }
 function screenToWorld(x, y) {
   return { x: (x - state.camera.tx) / state.camera.scale, y: (y - state.camera.ty) / state.camera.scale };
+}
+function liveCardDims(node) {
+  const el = document.querySelector(`.node-card[data-id="${CSS.escape(String(node.id))}"]`);
+  if (!el) return cardDims(node);
+  const shell = el.querySelector('.card-shell') || el;
+  const w = shell.offsetWidth || el.offsetWidth;
+  const h = shell.offsetHeight || el.offsetHeight;
+  return w && h ? { w, h } : cardDims(node);
+}
+function rememberPointerCapture(pointerId, element) {
+  if (pointerId == null || !element) return;
+  state.capturedPointers.set(pointerId, element);
+}
+function releaseRememberedPointer(pointerId) {
+  const element = state.capturedPointers.get(pointerId);
+  if (element) { try { if (element.hasPointerCapture?.(pointerId)) element.releasePointerCapture(pointerId); } catch (_) {} }
+  state.capturedPointers.delete(pointerId);
+}
+function armInteractionWatchdog() {
+  clearTimeout(state.interactionWatchdog);
+  state.interactionWatchdog = setTimeout(() => {
+    if (state.canvasPointers.size || state.linkDrag || state.linkFlowGesture) resetAllTransientGestures();
+  }, 5000);
 }
 
 /* IndexedDB asset storage */
@@ -567,6 +592,7 @@ function bindWorkspaceOnce() {
   viewport.addEventListener("pointermove", onCanvasPointerMove);
   viewport.addEventListener("pointerup", onCanvasPointerEnd);
   viewport.addEventListener("pointercancel", onCanvasPointerEnd);
+  viewport.addEventListener("lostpointercapture", event => { releaseRememberedPointer(event.pointerId); resetAllTransientGestures(); });
   window.addEventListener("resize", () => { drawDots(); applyCamera(); });
 
   $$('.space-switch button').forEach(button => button.addEventListener("click", () => switchSpace(button.dataset.space)));
@@ -600,6 +626,11 @@ function bindWorkspaceOnce() {
     resetAllTransientGestures();
   }, { passive: false });
   window.addEventListener("blur", resetAllTransientGestures);
+  window.addEventListener("pageshow", resetAllTransientGestures);
+  window.addEventListener("touchcancel", resetAllTransientGestures, { passive: true });
+  window.addEventListener("pointerdown", event => {
+    if (event.pointerType === "touch" && (state.linkDrag || state.linkFlowGesture) && event.pointerId !== state.linkDrag?.pointerId && event.pointerId !== state.linkFlowGesture?.pointerId) resetAllTransientGestures();
+  }, { capture: true, passive: true });
   document.addEventListener("visibilitychange", () => { if (document.hidden) resetAllTransientGestures(); });
   $("#detailEditButton").addEventListener("click", () => {
     const node = nodeById(state.activeNodeId); if (node) openEditor(node);
@@ -867,7 +898,7 @@ function renderLinks() {
   state.data.links.forEach(link => {
     const a = nodeById(link.a), b = nodeById(link.b);
     if (!a || !b || a.space !== state.space || b.space !== state.space || a.archived || b.archived) return;
-    const aDims = cardDims(a), bDims = cardDims(b);
+    const aDims = liveCardDims(a), bDims = liveCardDims(b);
     if (viewBounds) {
       const minX = Math.min(a.x, b.x), minY = Math.min(a.y, b.y);
       const maxX = Math.max(a.x + aDims.w, b.x + bDims.w), maxY = Math.max(a.y + aDims.h, b.y + bDims.h);
@@ -950,6 +981,7 @@ function curveBetweenPoints(start, end) {
 function resetCanvasGestureState() {
   cancelAnimationFrame(state.cameraInertiaFrame);
   state.cameraInertiaFrame = 0;
+  [...state.canvasPointers.keys()].forEach(releaseRememberedPointer);
   state.canvasPointers.clear();
   state.canvasGesture = null;
   const viewport = $("#canvasViewport");
@@ -957,6 +989,8 @@ function resetCanvasGestureState() {
   setZoomInteraction(false);
 }
 function resetLinkGestureState() {
+  if (state.linkFlowGesture?.pointerId != null) releaseRememberedPointer(state.linkFlowGesture.pointerId);
+  if (state.linkDrag?.pointerId != null) releaseRememberedPointer(state.linkDrag.pointerId);
   state.linkFlowGesture = null;
   state.linkDrag = null;
   state.linkDropTargetId = null;
@@ -965,8 +999,12 @@ function resetLinkGestureState() {
   setZoomInteraction(false);
 }
 function resetAllTransientGestures() {
+  clearTimeout(state.interactionWatchdog);
+  state.interactionWatchdog = 0;
   resetCanvasGestureState();
   resetLinkGestureState();
+  state.capturedPointers.forEach((_, id) => releaseRememberedPointer(id));
+  document.documentElement.classList.remove("interaction-locked");
 }
 
 function handleLinkPointerDown(event) {
@@ -975,7 +1013,9 @@ function handleLinkPointerDown(event) {
   if (!handle && !hit) return;
   event.preventDefault(); event.stopPropagation();
   resetCanvasGestureState();
-  try { (handle || hit).setPointerCapture?.(event.pointerId); } catch (_) {}
+  try { (handle || hit).setPointerCapture?.(event.pointerId); rememberPointerCapture(event.pointerId, handle || hit); } catch (_) {}
+  armInteractionWatchdog();
+  document.documentElement.classList.add("interaction-locked");
   const linkId = (handle || hit).dataset.linkId;
   if (!linkId) return;
   const linkRecord = state.data.links.find(item => item.id === linkId);
@@ -1015,6 +1055,9 @@ function handleLinkPointerMove(event) {
   if (Math.hypot(point.x - flow.start.x, point.y - flow.start.y) > 30 / Math.max(.28, state.camera.scale)) flow.moved = true;
 }
 function finishLinkPointerDrag(event) {
+  releaseRememberedPointer(event.pointerId);
+  clearTimeout(state.interactionWatchdog); state.interactionWatchdog = 0;
+  document.documentElement.classList.remove("interaction-locked");
   const flow = state.linkFlowGesture;
   if (flow && flow.pointerId === event.pointerId && !state.linkDrag) {
     state.linkFlowGesture = null;
@@ -1086,7 +1129,7 @@ function findLinkDropTarget(point, fixedId) {
   let best = null, bestDistance = Infinity;
   currentNodes().forEach(node => {
     if (node.id === fixedId) return;
-    const dim = cardDims(node);
+    const dim = liveCardDims(node);
     const pad = 28;
     if (point.x < node.x - pad || point.x > node.x + dim.w + pad || point.y < node.y - pad || point.y > node.y + dim.h + pad) return;
     const cx = node.x + dim.w / 2, cy = node.y + dim.h / 2;
@@ -1140,7 +1183,7 @@ function deleteSelectedLink() {
   saveData(); renderLinks(); toast("Связь удалена", "Отменить", undoLast);
 }
 function linkGeometry(a, b) {
-  const ad = cardDims(a), bd = cardDims(b);
+  const ad = liveCardDims(a), bd = liveCardDims(b);
   const ac = { x: a.x + ad.w / 2, y: a.y + ad.h / 2 };
   const bc = { x: b.x + bd.w / 2, y: b.y + bd.h / 2 };
   const dx = bc.x - ac.x, dy = bc.y - ac.y;
@@ -1376,7 +1419,8 @@ function onCanvasPointerDown(event) {
   if (state.linkFlowGesture || state.linkDrag) resetLinkGestureState();
   if (event.target.closest(".node-card,.canvas-utility,.gesture-hint,.link-hit,.link-end-handle,.link-toolbar")) return;
   event.preventDefault();
-  event.currentTarget.setPointerCapture?.(event.pointerId);
+  event.currentTarget.setPointerCapture?.(event.pointerId); rememberPointerCapture(event.pointerId, event.currentTarget);
+  armInteractionWatchdog();
   state.canvasPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
   if (state.canvasPointers.size === 1) {
     state.canvasGesture = { type: "pan", startX: event.clientX, startY: event.clientY, tx: state.camera.tx, ty: state.camera.ty, moved: false, time: performance.now(), lastX:event.clientX,lastY:event.clientY,lastT:performance.now(),vx:0,vy:0,samples:[] };
@@ -1413,6 +1457,7 @@ function onCanvasPointerMove(event) {
   }
 }
 function onCanvasPointerEnd(event) {
+  releaseRememberedPointer(event.pointerId);
   if (!state.canvasPointers.has(event.pointerId)) {
     if (state.canvasPointers.size === 0) resetCanvasGestureState();
     return;
@@ -1434,6 +1479,7 @@ function onCanvasPointerEnd(event) {
     if (gesture?.type === "pan" && gesture.moved) startCameraInertia(gesture.vx || 0, gesture.vy || 0);
     else settleCameraBounds();
     state.canvasGesture = null;
+    clearTimeout(state.interactionWatchdog); state.interactionWatchdog = 0;
   } else if (state.canvasPointers.size === 1) {
     const point = [...state.canvasPointers.values()][0];
     state.canvasGesture = { type: "pan", startX: point.x, startY: point.y, tx: state.camera.tx, ty: state.camera.ty, moved: false, time: performance.now(), lastX:point.x,lastY:point.y,lastT:performance.now(),vx:0,vy:0,samples:[] };
@@ -1452,7 +1498,7 @@ function attachCardGestures(element, node) {
   element.addEventListener("pointerdown", event => {
     cancelAnimationFrame(state.cameraInertiaFrame); state.cameraInertiaFrame=0;
     if (event.target.closest("button,input")) return;
-    event.preventDefault(); event.stopPropagation(); element.setPointerCapture?.(event.pointerId);
+    event.preventDefault(); event.stopPropagation(); element.setPointerCapture?.(event.pointerId); rememberPointerCapture(event.pointerId, element); armInteractionWatchdog();
     pointers.set(event.pointerId, { x: event.clientX, y: event.clientY, t: performance.now() });
     if (pointers.size === 2) {
       cancelLong();
@@ -1502,6 +1548,7 @@ function attachCardGestures(element, node) {
   });
 
   const finish = event => {
+    releaseRememberedPointer(event.pointerId);
     if (!pointers.has(event.pointerId)) return;
     pointers.delete(event.pointerId); cancelLong();
     if (gesture?.type === "pinch") {
@@ -1533,9 +1580,11 @@ function attachCardGestures(element, node) {
       }
     }
     gesture = null;
+    if (!pointers.size) { clearTimeout(state.interactionWatchdog); state.interactionWatchdog = 0; }
   };
   element.addEventListener("pointerup", finish);
   element.addEventListener("pointercancel", finish);
+  element.addEventListener("lostpointercapture", event => { releaseRememberedPointer(event.pointerId); pointers.delete(event.pointerId); cancelLong(); element.classList.remove("dragging"); element.style.transform=""; element.style.zIndex=""; gesture=null; resetAllTransientGestures(); });
 }
 
 /* Create and card actions */
