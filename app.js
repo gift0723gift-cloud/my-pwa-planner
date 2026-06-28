@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "6.0.52";
+const VERSION = "6.0.53";
 const THEME_KEY = "boonwave_theme";
 const ACCOUNTS_KEY = "boonwave_v6_accounts";
 const SESSION_KEY = "boonwave_v6_session";
@@ -575,11 +575,15 @@ function enterApp(user, useDemo) {
   requestAnimationFrame(() => $("#app").classList.add("app-ready"));
   $("#accountLabel").textContent = user.name || user.email || "Локальный аккаунт";
   bindWorkspaceOnce();
+  resetAllTransientGestures();
   render();
   requestAnimationFrame(() => {
-    if (currentNodes().length) fitAll(false);
-    else centerCamera();
-    requestAnimationFrame(() => scheduleRenderLinks());
+    requestAnimationFrame(() => {
+      if (currentNodes().length) fitAll(false);
+      else centerCamera();
+      scheduleRenderLinks();
+      setTimeout(() => { applyCamera(); scheduleRenderLinks(); }, 80);
+    });
     if (!state.data.settings.hintDismissed) $("#gestureHint").classList.remove("hidden");
   });
 }
@@ -754,6 +758,7 @@ function bindWorkspaceOnce() {
     if (!task) return;
     clearNowTaskPress();
     task.classList.add("is-pressing");
+    try { if (navigator.vibrate) navigator.vibrate(9); } catch (_) {}
   }, { passive: true });
   $("#panelBody").addEventListener("pointerup", clearNowTaskPress, { passive: true });
   $("#panelBody").addEventListener("pointercancel", clearNowTaskPress, { passive: true });
@@ -2074,7 +2079,13 @@ function handleDetailClick(event) {
   }
   const actionButton = event.target.closest("[data-detail-action]"); if (!actionButton) return;
   const action = actionButton.dataset.detailAction;
-  if (action === "addAssets") { state.assetTargetNodeId = node.id; $("#assetInput").click(); }
+  if (action === "addAssets") {
+    state.assetTargetNodeId = node.id;
+    document.body.classList.add("asset-picker-pending");
+    toast("Выберите изображения или файлы");
+    $("#assetInput").click();
+    setTimeout(() => document.body.classList.remove("asset-picker-pending"), 1200);
+  }
   if (action === "openProcess") { const existing=state.data.nodes.find(item=>item.type==="process"&&item.projectId===node.id&&!item.archived); if(existing){state.selectedId=existing.id;render();focusNode(existing);openDetail(existing);}else createProcessForProject(node); }
   if (action === "editNode") openEditor(node);
   if (action === "editBudget") openBudgetEditor(node);
@@ -2277,7 +2288,7 @@ function renderEditorBody() {
     <div class="field-grid"><div class="field"><label>Количество позиций</label><input name="positions" inputmode="numeric" value="${esc(d.positions || "")}"></div><div class="field"><label>Дата подписания</label><input name="signDate" type="date" value="${esc(d.signDate || "")}"></div></div>
     <div class="field-grid"><div class="field"><label>Бюджет</label><input name="budget" inputmode="decimal" value="${esc(d.budget || "")}"></div><div class="field"><label>Срок</label><input name="deadline" type="date" value="${esc(d.deadline || "")}"></div></div>
     <div class="field-grid"><div class="field"><label>Аванс</label><input name="advance" inputmode="decimal" value="${esc(d.advance || "")}"></div><div class="field"><label>Остаток</label><input name="balance" inputmode="decimal" value="${esc(d.balance || "")}"></div></div>
-    <div class="editor-group"><h3>Основные материалы</h3><button type="button" class="ghost" data-editor-action="addAssets">＋ Изображения, PDF и векторные файлы</button></div>`;
+    <div class="editor-group"><h3>Основные материалы</h3><button type="button" class="ghost" data-editor-action="addAssets">＋ Добавить изображения, PDF или векторные файлы</button></div>`;
   if (d.type === "person") {
     const knownStatuses = ["Неизвестно","Временно","Перспективный","Работаем"];
     const mode = knownStatuses.includes(d.personStatusMode) ? d.personStatusMode : (knownStatuses.includes(d.personStatus) ? d.personStatus : "custom");
@@ -2314,7 +2325,13 @@ function processEditorHtml(d) {
 function bindEditorDynamicActions() {
   $("#editorBody").onclick = event => {
     const action = event.target.closest("[data-editor-action]")?.dataset.editorAction;
-    if (action === "addAssets") { state.assetTargetNodeId = state.activeNodeId; $("#assetInput").click(); }
+    if (action === "addAssets") {
+      state.assetTargetNodeId = state.activeNodeId;
+      document.body.classList.add("asset-picker-pending");
+      toast("Выберите изображения или файлы");
+      $("#assetInput").click();
+      setTimeout(() => document.body.classList.remove("asset-picker-pending"), 1200);
+    }
     if (action === "newProcessCover") $("#processCoverInput").click();
     if (action === "positionProcessCover" && state.editDraft?.coverAssetId) openProcessCoverPositionDialog(state.editDraft.coverAssetId);
     if (action === "removeProcessCover") removeProcessCoverFromDraft();
@@ -2671,6 +2688,7 @@ function archiveActiveNode() {
 
 /* Assets */
 async function handleAssetFiles(event) {
+  document.body.classList.remove("asset-picker-pending");
   const node = nodeById(state.assetTargetNodeId); const files = [...event.target.files]; event.target.value = "";
   if (!node || !files.length) return;
   node.assets ||= [];
